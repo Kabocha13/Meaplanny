@@ -12,7 +12,7 @@
         /* グローバル設定とカスタムCSS */
         :root {
             --color-white: #FEFEFE;
-            --color-black: #111827;
+            --color-black: #000000; /* 純粋な黒に変更し、青みを排除 */
             --color-yellow: #FFC72C; /* スロット、警告 */
             --color-red: #D32F2F;   /* アクティブ、点滅コロン */
         }
@@ -96,7 +96,6 @@
 
         <!-- ヘッダー (現在時刻表示のみ) -->
         <header class="p-3 bg-white ink-border-b sticky top-0 z-20 flex justify-end items-center">
-            <!-- タイトルを削除しました -->
             <!-- text-3xl に変更し、秒数表示に対応 -->
             <div id="current-time" class="retro-digital text-3xl text-right">00<span class="blinking-colon">:</span>00<span class="blinking-colon">:</span>00</div>
         </header>
@@ -133,8 +132,16 @@
         // 0. 初期設定とユーティリティ
         // =======================================================
 
-        const storageKey = 'steamboatPlannerData';
         const defaultLocation = '新浦安駅'; // モックデータ起点の場所
+
+        const BIN_ID = '68e4a432ae596e708f08d474'; // <<< ここにあなたのBin IDを貼り付けてください (例: '6543210...')
+        const X_MASTER_KEY = '$2a$10$jXqWaOsnNAUVPbvzX4ytFeZoXohqmbWD20InKtsiIQr3.vkgXzj36'; // 
+        
+        if (!BIN_ID || !X_MASTER_KEY) {
+            console.error("【設定エラー】BIN_ID または X_MASTER_KEY が設定されていません。アプリはデモデータで動作します。");
+        }
+
+        const JSONBIN_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
 
         let appData = {
             schedules: [],
@@ -149,34 +156,115 @@
         const modalContent = document.getElementById('modal-content');
 
         /**
-         * データをlocalStorageからロード
+         * データをJSON Binからロード
+         * @returns {Promise<void>}
          */
-        function loadData() {
+        async function loadData() {
+            if (!BIN_ID || !X_MASTER_KEY) {
+                initializeDemoData();
+                return;
+            }
+
+            console.log("データをJSON Binからロード中...");
             try {
-                const storedData = localStorage.getItem(storageKey);
-                if (storedData) {
-                    const parsedData = JSON.parse(storedData);
-                    // データの破損や不足を防ぐためのチェック
-                    if (parsedData.schedules && Array.isArray(parsedData.schedules)) {
-                        appData = { ...appData, ...parsedData };
+                // エラーハンドリングのためのExponential Backoffを実装
+                let response = null;
+                for (let i = 0; i < 3; i++) {
+                    response = await fetch(JSONBIN_URL, {
+                        method: 'GET',
+                        headers: {
+                            'X-Master-Key': X_MASTER_KEY,
+                            'X-Bin-Meta': 'false' // メタデータを含めない
+                        }
+                    });
+
+                    if (response.ok || response.status === 404) break; 
+                    
+                    // 失敗した場合、指数関数的に待機 (1s, 2s, 4s...)
+                    const delay = Math.pow(2, i) * 1000;
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+                
+                if (!response.ok) {
+                    if (response.status === 404) {
+                        console.log("JSON Binにデータが見つかりませんでした。初回起動またはBinが空です。");
+                        // データがない場合は、初期データを設定（後でsaveData()で保存される）
+                        initializeDemoData();
+                        return;
                     }
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const storedData = await response.json();
+
+                // データの破損や不足を防ぐためのチェック
+                if (storedData && storedData.schedules && Array.isArray(storedData.schedules)) {
+                    appData = { ...appData, ...storedData };
+                    // currentDateはDateオブジェクトとして扱うため、ISO文字列から復元
+                    if (appData.currentDate) {
+                        appData.currentDate = new Date(appData.currentDate);
+                    }
+                    console.log("JSON Binからデータが正常にロードされました。");
+                } else {
+                    // データフォーマットが不正な場合
+                    console.error("JSON Binからのデータフォーマットが不正です。初期データを設定します。");
+                    initializeDemoData();
                 }
             } catch (e) {
-                console.error("Failed to load data from localStorage", e);
-                // データロード失敗時は初期データを使用
+                console.error("JSON Binからのデータロードに失敗しました。オフラインモードで続行します。", e);
+                // ロード失敗時は初期データを使用
+                initializeDemoData();
             }
         }
 
         /**
-         * データをlocalStorageに保存
+         * データをJSON Binに保存
+         * @returns {Promise<void>}
          */
-        function saveData() {
+        async function saveData() {
+            if (!BIN_ID || !X_MASTER_KEY) {
+                console.log("キーが未設定のため、データ保存はスキップされました。");
+                return;
+            }
+
+            console.log("データをJSON Binに保存中...");
             try {
-                localStorage.setItem(storageKey, JSON.stringify(appData));
+                // JSON Binに保存する前に、DateオブジェクトをISO文字列に戻す
+                const dataToSave = {
+                    ...appData,
+                    currentDate: appData.currentDate.toISOString()
+                };
+
+                // エラーハンドリングのためのExponential Backoffを実装
+                let response = null;
+                for (let i = 0; i < 3; i++) {
+                    response = await fetch(JSONBIN_URL, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Master-Key': X_MASTER_KEY
+                        },
+                        body: JSON.stringify(dataToSave)
+                    });
+
+                    if (response.ok) break; 
+                    
+                    // 失敗した場合、指数関数的に待機 (1s, 2s, 4s...)
+                    const delay = Math.pow(2, i) * 1000;
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                console.log("JSON Binへのデータ保存が成功しました。");
+
             } catch (e) {
-                console.error("Failed to save data to localStorage", e);
+                console.error("JSON Binへのデータ保存に失敗しました。", e);
             }
         }
+
 
         /**
          * 現在時刻をヘッダーに表示（赤い点滅コロン付き）
@@ -237,7 +325,7 @@
                 eventData.id = appData.lastId;
                 appData.schedules.push(eventData);
             }
-            saveData();
+            saveData(); // 非同期で保存
             closeModal();
             renderView(appData.currentView);
         }
@@ -250,7 +338,7 @@
             // 確認モーダルの代わりにカスタムメッセージボックスを使用
             showCustomMessageBox('確認', 'この予定を削除しますか？', () => {
                 appData.schedules = appData.schedules.filter(e => e.id !== id);
-                saveData();
+                saveData(); // 非同期で保存
                 closeModal();
                 renderView(appData.currentView);
             });
@@ -848,7 +936,7 @@
 
                     // 9:00を基準とした相対位置を計算 (h=8が開始時間)
                     const totalMinutesFromStart = ((start.getHours() - hourStart) * 60) + start.getMinutes();
-                    const durationMinutes = (end.getTime() - start.getTime()) / (60 * 1000);
+                    const durationMinutes = (end.getTime() - start.getTime()) / (60 * 60 * 1000);
 
                     if (totalMinutesFromStart >= 0 && durationMinutes > 0) {
                         const topPosition = (totalMinutesFromStart / 60) * hourHeight;
@@ -1016,58 +1104,55 @@
          * 初期データを作成 (デモ用)
          */
         function initializeDemoData() {
-            if (appData.schedules.length > 0) return; // 既存データがあればスキップ
-
-            const now = new Date();
-            const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-            const nextWeek = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-
-            // 予定 (スケジュール)
-            appData.schedules.push({
-                id: 1, title: 'クライアントとのミーティング', type: 'schedule',
-                start: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 10, 0).toISOString(),
-                end: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 11, 30).toISOString(),
-                location: '大手町ビル', notes: '新プロジェクトのキックオフ', completed: false, actualEnd: null
-            });
-            appData.schedules.push({
-                id: 2, title: 'チームランチ', type: 'schedule',
-                start: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0).toISOString(),
-                end: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 13, 0).toISOString(),
-                location: '社食', notes: '', completed: false, actualEnd: null
-            });
-
-            // タスク (未完了)
-            appData.schedules.push({
-                id: 3, title: '週報のドラフト作成', type: 'task',
-                start: tomorrow.toISOString(),
-                end: new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate(), 15, 0).toISOString(),
-                location: '自宅', notes: '分析データを含めること', completed: false, actualEnd: null
-            });
-            appData.schedules.push({
-                id: 4, title: '来週のプレゼン資料準備', type: 'task',
-                start: nextWeek.toISOString(),
-                end: new Date(nextWeek.getFullYear(), nextWeek.getMonth(), nextWeek.getDate(), 10, 0).toISOString(),
-                location: '', notes: 'アニメーションを工夫', completed: false, actualEnd: null
-            });
-
-            // タスク (完了済み)
-            const completedTime = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000); // 2日前の時間
-            appData.schedules.push({
-                id: 5, title: 'メールの返信処理', type: 'task',
-                start: completedTime.toISOString(),
-                end: completedTime.toISOString(),
-                location: '', notes: '緊急度の高いもの優先', completed: true, actualEnd: new Date(completedTime.getTime() + 10 * 60 * 1000).toISOString()
-            });
-
-            appData.lastId = 5;
-            saveData();
+            // ユーザーが選択したCanvasのデータ構造を使用し、Dateオブジェクトに変換
+            appData = {
+                schedules: [
+                    {
+                        id: 1,
+                        title: "クライアントとのミーティング (予定)",
+                        type: "schedule",
+                        start: "2025-10-07T10:00:00.000Z",
+                        end: "2025-10-07T11:30:00.000Z",
+                        location: "大手町ビル",
+                        notes: "新プロジェクトのキックオフ",
+                        completed: false,
+                        actualEnd: null
+                    },
+                    {
+                        id: 3,
+                        title: "週報のドラフト作成 (タスク)",
+                        type: "task",
+                        start: "2025-10-08T06:00:00.000Z",
+                        end: "2025-10-08T06:30:00.000Z",
+                        location: "自宅",
+                        notes: "分析データを含めること",
+                        completed: false,
+                        actualEnd: null
+                    },
+                    {
+                        id: 5,
+                        title: "メールの返信処理 (完了済みタスク)",
+                        type: "task",
+                        start: "2025-10-05T08:00:00.000Z",
+                        end: "2025-10-05T09:00:00.000Z",
+                        location: "オフィス",
+                        notes: "完了済みタスクの例",
+                        completed: true,
+                        actualEnd: "2025-10-05T08:10:00.000Z"
+                    }
+                ],
+                currentView: "month",
+                lastId: 5,
+                // currentDate は Dateオブジェクトとして扱うため、現在時刻を使用
+                currentDate: new Date() 
+            };
+            console.log("初期デモデータを設定しました。");
         }
 
         // アプリケーションの開始
-        window.onload = function() {
-            // データロードと初期データ作成
-            loadData();
-            initializeDemoData(); // デモデータ
+        window.onload = async function() {
+            // データロード (JSON Binから)
+            await loadData(); 
 
             // 現在時刻の更新ループ
             updateCurrentTime();
