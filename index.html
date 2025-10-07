@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!DOCTYPE ahtml>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
@@ -134,11 +134,19 @@
 
         const defaultLocation = '新浦安駅'; // モックデータ起点の場所
 
-        const BIN_ID = '68e4a432ae596e708f08d474'; // <<< ここにあなたのBin IDを貼り付けてください (例: '6543210...')
-        const X_MASTER_KEY = '$2a$10$jXqWaOsnNAUVPbvzX4ytFeZoXohqmbWD20InKtsiIQr3.vkgXzj36'; // 
+        // JSON Bin 設定
+        const BIN_ID = '68e4a432ae596e708f08d474';
+        const X_MASTER_KEY = '$2a$10$jXqWaOsnNAUVPbvzX4ytFeZoXohqmbWD20InKtsiIQr3.vkgXzj36';
         
+        // Yahoo! 天気 API 設定
+        const YAHOO_APP_ID = 'dj00aiZpPXB4WG9iY09wSm5xWCZzPWNvbnN1bWVyc2VjcmV0Jng9YTY-'; // ユーザー提供のApp ID
+        // 新浦安駅付近の座標 (経度, 緯度)
+        const SHIN_URAYASU_COORDS = '139.9079,35.6517'; 
+        const YAHOO_WEATHER_URL = `https://map.yahooapis.jp/weather/V1/place?coordinates=${SHIN_URAYASU_COORDS}&output=json&appid=${YAHOO_APP_ID}`;
+
+
         if (!BIN_ID || !X_MASTER_KEY) {
-            console.error("【設定エラー】BIN_ID または X_MASTER_KEY が設定されていません。アプリはデモデータで動作します。");
+            console.error("【設定エラー】JSON Binキーが設定されていません。アプリは空のデータで動作します。");
         }
 
         const JSONBIN_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
@@ -167,20 +175,18 @@
 
             console.log("データをJSON Binからロード中...");
             try {
-                // エラーハンドリングのためのExponential Backoffを実装
                 let response = null;
                 for (let i = 0; i < 3; i++) {
                     response = await fetch(JSONBIN_URL, {
                         method: 'GET',
                         headers: {
                             'X-Master-Key': X_MASTER_KEY,
-                            'X-Bin-Meta': 'false' // メタデータを含めない
+                            'X-Bin-Meta': 'false' 
                         }
                     });
 
                     if (response.ok || response.status === 404) break; 
                     
-                    // 失敗した場合、指数関数的に待機 (1s, 2s, 4s...)
                     const delay = Math.pow(2, i) * 1000;
                     await new Promise(resolve => setTimeout(resolve, delay));
                 }
@@ -188,7 +194,6 @@
                 if (!response.ok) {
                     if (response.status === 404) {
                         console.log("JSON Binにデータが見つかりませんでした。初回起動またはBinが空です。");
-                        // データがない場合は、初期データを設定（後でsaveData()で保存される）
                         initializeDemoData();
                         return;
                     }
@@ -197,22 +202,18 @@
 
                 const storedData = await response.json();
 
-                // データの破損や不足を防ぐためのチェック
                 if (storedData && storedData.schedules && Array.isArray(storedData.schedules)) {
                     appData = { ...appData, ...storedData };
-                    // currentDateはDateオブジェクトとして扱うため、ISO文字列から復元
                     if (appData.currentDate) {
                         appData.currentDate = new Date(appData.currentDate);
                     }
                     console.log("JSON Binからデータが正常にロードされました。");
                 } else {
-                    // データフォーマットが不正な場合
-                    console.error("JSON Binからのデータフォーマットが不正です。初期データを設定します。");
+                    console.error("JSON Binからのデータフォーマットが不正です。空のデータを設定します。");
                     initializeDemoData();
                 }
             } catch (e) {
-                console.error("JSON Binからのデータロードに失敗しました。オフラインモードで続行します。", e);
-                // ロード失敗時は初期データを使用
+                console.error("JSON Binからのデータロードに失敗しました。空のデータで続行します。", e);
                 initializeDemoData();
             }
         }
@@ -229,13 +230,11 @@
 
             console.log("データをJSON Binに保存中...");
             try {
-                // JSON Binに保存する前に、DateオブジェクトをISO文字列に戻す
                 const dataToSave = {
                     ...appData,
                     currentDate: appData.currentDate.toISOString()
                 };
 
-                // エラーハンドリングのためのExponential Backoffを実装
                 let response = null;
                 for (let i = 0; i < 3; i++) {
                     response = await fetch(JSONBIN_URL, {
@@ -249,7 +248,6 @@
 
                     if (response.ok) break; 
                     
-                    // 失敗した場合、指数関数的に待機 (1s, 2s, 4s...)
                     const delay = Math.pow(2, i) * 1000;
                     await new Promise(resolve => setTimeout(resolve, delay));
                 }
@@ -273,9 +271,7 @@
             const now = new Date();
             const hours = String(now.getHours()).padStart(2, '0');
             const minutes = String(now.getMinutes()).padStart(2, '0');
-            const seconds = String(now.getSeconds()).padStart(2, '0'); // 秒数を取得
-
-            // 時分秒すべてを表示し、間に点滅コロンを挿入
+            const seconds = String(now.getSeconds()).padStart(2, '0');
             const timeString = `${hours}<span class="blinking-colon">:</span>${minutes}<span class="blinking-colon">:</span>${seconds}`;
             document.getElementById('current-time').innerHTML = timeString;
         }
@@ -325,7 +321,7 @@
                 eventData.id = appData.lastId;
                 appData.schedules.push(eventData);
             }
-            saveData(); // 非同期で保存
+            saveData(); 
             closeModal();
             renderView(appData.currentView);
         }
@@ -338,7 +334,7 @@
             // 確認モーダルの代わりにカスタムメッセージボックスを使用
             showCustomMessageBox('確認', 'この予定を削除しますか？', () => {
                 appData.schedules = appData.schedules.filter(e => e.id !== id);
-                saveData(); // 非同期で保存
+                saveData(); 
                 closeModal();
                 renderView(appData.currentView);
             });
@@ -353,7 +349,7 @@
             if (task) {
                 task.completed = !task.completed;
                 if (task.completed) {
-                    task.actualEnd = new Date().toISOString(); // 完了時刻を記録
+                    task.actualEnd = new Date().toISOString(); 
                 } else {
                     task.actualEnd = null;
                 }
@@ -483,7 +479,7 @@
          * イベント詳細モーダルの表示
          * @param {number} id - イベントID
          */
-        function showEventDetails(id) {
+        async function showEventDetails(id) {
             const event = appData.schedules.find(e => e.id === id);
             if (!event) return;
 
@@ -493,9 +489,18 @@
             const dateStr = `${start.getMonth() + 1}月${start.getDate()}日`;
             const timeStr = `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')} - ${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
 
-            // モックデータ生成
+            // モーダルにローディング表示を一時的に挿入
+            openModal(`
+                <h2 class="text-2xl font-extrabold ink-border-b pb-2 mb-4">${event.title}</h2>
+                <div class="text-center py-8">
+                    <p class="font-bold">情報をロード中...</p>
+                    <p class="text-sm italic text-gray-600">（経路・天気連携）</p>
+                </div>
+            `);
+
+            // モックデータ生成 (非同期の天気予報を待つ)
             const { time, route } = getMockRouteInfo(event.location);
-            const weather = getMockWeather(start, event.location);
+            const weather = await getWeatherForecast(start, event.location); // ここで非同期処理を待機
 
             const weatherWarning = weather.warning ? 'bg-[var(--color-yellow)] text-black font-bold p-1 rounded-sm' : 'text-black';
 
@@ -510,16 +515,16 @@
                     ${event.notes ? `<p class="font-bold border-t pt-3">📝 備考:</p><p class="whitespace-pre-wrap">${event.notes}</p>` : ''}
                 </div>
 
-                <!-- 外部情報連携 (モック) -->
+                <!-- 外部情報連携 (リアル/モック混在) -->
                 <div class="ink-border p-3 mt-4 bg-gray-100">
                     <h3 class="font-extrabold text-lg ink-border-b border-dashed pb-2 mb-3">レトロ情報連携</h3>
 
-                    <!-- 天気予報モック -->
+                    <!-- 天気予報 -->
                     <div class="flex items-center justify-between mb-3">
                         <span class="font-bold">天気予報:</span>
                         <div class="flex items-center space-x-2 ${weatherWarning}">
                             <span class="weather-icon text-2xl">${weather.icon}</span>
-                            <span>${weather.condition} | ${weather.temp}°C (${weather.rain}% 降水)</span>
+                            <span>${weather.condition} | ${weather.temp}°C (${weather.rain}mm/h 降水強度)</span>
                         </div>
                     </div>
 
@@ -539,6 +544,7 @@
                     <button onclick="deleteEvent(${event.id})" class="steamboat-button bg-gray-800 text-white px-4 py-2 ink-border font-bold">削除</button>
                 </div>
             `;
+            // 再度モーダルを開く (ローディング画面の上書き)
             openModal(detailHtml);
         }
 
@@ -563,7 +569,7 @@
 
 
         // =======================================================
-        // 3. 外部情報連携モック
+        // 3. 外部情報連携 (リアル/モック)
         // =======================================================
 
         /**
@@ -603,36 +609,100 @@
         }
 
         /**
-         * モックの天気予報
-         * @param {Date} date - 予定の日時
-         * @param {string} location - 予定の場所 (モックでは使用しない)
-         * @returns {{icon: string, condition: string, temp: number, rain: number, warning: boolean}}
+         * 外部API (Yahoo V1/place) からリアルタイム降水強度を取得
+         * @returns {Promise<number>} - 降水強度 (mm/h)。失敗時は0を返す。
          */
-        function getMockWeather(date, location) {
+        async function getRealTimeRainfall() {
+            if (!YAHOO_APP_ID) return 0;
+
+            try {
+                let response = null;
+                for (let i = 0; i < 2; i++) {
+                    response = await fetch(YAHOO_WEATHER_URL);
+                    if (response.ok) break; 
+                    const delay = Math.pow(2, i) * 1000;
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+
+                if (!response.ok) throw new Error(`Yahoo API HTTP Error: ${response.status}`);
+                
+                const data = await response.json();
+                const feature = data.Feature?.[0];
+                
+                if (feature && feature.Property && feature.Property.WeatherList && feature.Property.WeatherList.Weather) {
+                    // 直近の降水強度 (mm/h) を取得
+                    const latestWeather = feature.Property.WeatherList.Weather[0];
+                    return parseFloat(latestWeather.Rainfall) || 0;
+                }
+            } catch (e) {
+                console.error("Yahoo!天気APIからのデータ取得に失敗しました (リアルタイム降水は0mm/hとして処理):", e);
+            }
+            return 0; 
+        }
+
+        /**
+         * 予定の日時に基づく天気予報を取得 (リアル降水 + モック予報)
+         * @param {Date} date - 予定の日時
+         * @param {string} location - 予定の場所
+         * @returns {Promise<{icon: string, condition: string, temp: number, rain: number, warning: boolean}>}
+         */
+        async function getWeatherForecast(date, location) {
+            const isFuture = date.getTime() > new Date().getTime();
+            let realRainfall = 0;
+
+            // 予定が未来の場合、リアルタイムの降水強度を取得
+            if (isFuture) {
+                realRainfall = await getRealTimeRainfall();
+            }
+            
+            // --- モック予報ロジック (Yahoo APIが提供しない PoP/Temp/未来の条件) ---
             const dayOfMonth = date.getDate();
             const hour = date.getHours();
-
             let condition, icon, rain, temp, warning = false;
 
-            if (dayOfMonth % 7 === 0) {
-                // 7の倍数の日は雨
-                condition = '大雨';
-                icon = '🌧️';
-                rain = 80;
+            // リアルタイム降水強度を基に、雨の警告を決定
+            if (realRainfall > 5) {
+                // 強雨 (5mm/h以上) の場合、リアルタイムで警告を出す
+                condition = '強雨 (リアルタイム)';
+                icon = '⚠️'; 
+                rain = realRainfall;
+                temp = 15;
+                warning = true;
+            } else if (realRainfall > 0) {
+                // 弱雨 (0-5mm/h)
+                condition = '弱雨 (リアルタイム)';
+                icon = '☔';
+                rain = realRainfall;
                 temp = 18;
-                warning = true; // 悪天候時は黄色警告
-            } else if (dayOfMonth % 3 === 0) {
-                // 3の倍数の日は曇り
-                condition = '曇り';
-                icon = '☁️';
-                rain = 10;
-                temp = 25;
-            } else {
-                // それ以外は晴れ
-                condition = '晴れ';
-                icon = '☀️';
+            } 
+            // リアルタイム降水がない場合、または過去の予定の場合、モック予報にフォールバック
+            else {
+                // モック予報
+                if (dayOfMonth % 7 === 0) {
+                    condition = '大雨 (予報モック)';
+                    icon = '🌧️';
+                    rain = 80; // モックの降水確率
+                    temp = 18;
+                    warning = true;
+                } else if (dayOfMonth % 3 === 0) {
+                    condition = '曇り (予報モック)';
+                    icon = '☁️';
+                    rain = 10;
+                    temp = 25;
+                } else {
+                    condition = '晴れ (予報モック)';
+                    icon = '☀️';
+                    rain = 0;
+                    temp = (hour < 10 || hour > 18) ? 20 : 28;
+                }
+            }
+
+            // リアルタイム降水強度を使用する場合、数値を小数点以下1桁に丸める
+            if (realRainfall > 0 && isFuture) {
+                rain = Math.round(realRainfall * 10) / 10;
+            } else if (!isFuture && realRainfall === 0) {
+                // 過去の予定の場合、モックの降水確率/強度は0とする
                 rain = 0;
-                temp = (hour < 10 || hour > 18) ? 20 : 28;
             }
 
             return { icon, condition, temp, rain, warning };
@@ -1101,52 +1171,17 @@
         // =======================================================
 
         /**
-         * 初期データを作成 (デモ用)
+         * 初期データを作成 (デモ用) - 予定が取得できなかった場合の空の状態を設定
          */
         function initializeDemoData() {
-            // ユーザーが選択したCanvasのデータ構造を使用し、Dateオブジェクトに変換
+            // データを空の状態にリセット
             appData = {
-                schedules: [
-                    {
-                        id: 1,
-                        title: "クライアントとのミーティング (予定)",
-                        type: "schedule",
-                        start: "2025-10-07T10:00:00.000Z",
-                        end: "2025-10-07T11:30:00.000Z",
-                        location: "大手町ビル",
-                        notes: "新プロジェクトのキックオフ",
-                        completed: false,
-                        actualEnd: null
-                    },
-                    {
-                        id: 3,
-                        title: "週報のドラフト作成 (タスク)",
-                        type: "task",
-                        start: "2025-10-08T06:00:00.000Z",
-                        end: "2025-10-08T06:30:00.000Z",
-                        location: "自宅",
-                        notes: "分析データを含めること",
-                        completed: false,
-                        actualEnd: null
-                    },
-                    {
-                        id: 5,
-                        title: "メールの返信処理 (完了済みタスク)",
-                        type: "task",
-                        start: "2025-10-05T08:00:00.000Z",
-                        end: "2025-10-05T09:00:00.000Z",
-                        location: "オフィス",
-                        notes: "完了済みタスクの例",
-                        completed: true,
-                        actualEnd: "2025-10-05T08:10:00.000Z"
-                    }
-                ],
-                currentView: "month",
-                lastId: 5,
-                // currentDate は Dateオブジェクトとして扱うため、現在時刻を使用
+                schedules: [], // スケジュールを空にする
+                currentView: appData.currentView || "month",
+                lastId: 0,
                 currentDate: new Date() 
             };
-            console.log("初期デモデータを設定しました。");
+            console.log("データロードに失敗したため、スケジュールを空の状態で開始します。");
         }
 
         // アプリケーションの開始
