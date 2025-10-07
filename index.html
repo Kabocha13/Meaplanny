@@ -132,13 +132,13 @@
         // 0. 初期設定とユーティリティ
         // =======================================================
 
-        const defaultLocation = '新浦安駅'; // モックデータ起点の場所
+        const defaultLocation = '新浦安駅'; // API座標の参照場所
 
         // JSON Bin 設定
         const BIN_ID = '68e4a432ae596e708f08d474';
         const X_MASTER_KEY = '$2a$10$jXqWaOsnNAUVPbvzX4ytFeZoXohqmbWD20InKtsiIQr3.vkgXzj36';
         
-        // Yahoo! 天気 API 設定
+        // Yahoo! 天気 API 設定 (リアルタイム降水強度のみ取得可能)
         const YAHOO_APP_ID = 'dj00aiZpPXB4WG9iY09wSm5xWCZzPWNvbnN1bWVyc2VjcmV0Jng9YTY-'; // ユーザー提供のApp ID
         // 新浦安駅付近の座標 (経度, 緯度)
         const SHIN_URAYASU_COORDS = '139.9079,35.6517'; 
@@ -494,15 +494,14 @@
                 <h2 class="text-2xl font-extrabold ink-border-b pb-2 mb-4">${event.title}</h2>
                 <div class="text-center py-8">
                     <p class="font-bold">情報をロード中...</p>
-                    <p class="text-sm italic text-gray-600">（経路・天気連携）</p>
+                    <p class="text-sm italic text-gray-600">（リアルタイム天気連携）</p>
                 </div>
             `);
 
-            // モックデータ生成 (非同期の天気予報を待つ)
-            const { time, route } = getMockRouteInfo(event.location);
-            const weather = await getWeatherForecast(start, event.location); // ここで非同期処理を待機
+            // リアルタイム天気ステータスを取得
+            const weather = await getRealTimeWeatherStatus(start); 
 
-            const weatherWarning = weather.warning ? 'bg-[var(--color-yellow)] text-black font-bold p-1 rounded-sm' : 'text-black';
+            const weatherWarning = weather.warning ? 'bg-[var(--color-red)] text-white font-bold p-1 rounded-sm' : 'text-black bg-gray-200';
 
             const detailHtml = `
                 <h2 class="text-2xl font-extrabold ink-border-b pb-2 mb-4">${event.title}</h2>
@@ -515,25 +514,34 @@
                     ${event.notes ? `<p class="font-bold border-t pt-3">📝 備考:</p><p class="whitespace-pre-wrap">${event.notes}</p>` : ''}
                 </div>
 
-                <!-- 外部情報連携 (リアル/モック混在) -->
+                <!-- 外部情報連携 (リアルデータのみ) -->
                 <div class="ink-border p-3 mt-4 bg-gray-100">
-                    <h3 class="font-extrabold text-lg ink-border-b border-dashed pb-2 mb-3">レトロ情報連携</h3>
+                    <h3 class="font-extrabold text-lg ink-border-b border-dashed pb-2 mb-3">リアルタイム情報連携</h3>
 
-                    <!-- 天気予報 -->
+                    <!-- 天気情報 (Yahoo V1/place はリアルタイム降水強度のみ提供) -->
                     <div class="flex items-center justify-between mb-3">
-                        <span class="font-bold">天気予報:</span>
+                        <span class="font-bold">現在の降水ステータス:</span>
                         <div class="flex items-center space-x-2 ${weatherWarning}">
                             <span class="weather-icon text-2xl">${weather.icon}</span>
-                            <span>${weather.condition} | ${weather.temp}°C (${weather.rain}mm/h 降水強度)</span>
+                            <span>${weather.condition}</span>
                         </div>
                     </div>
 
-                    <!-- 経路・時間検索モック -->
-                    <div>
-                        <p class="font-bold mb-1">🚗 新浦安駅からの所要時間 (モック):</p>
-                        <p class="text-sm bg-white p-2 ink-border">
-                            ${time}
-                            <span class="block text-xs text-gray-600 mt-1">${route}</span>
+                    <div class="flex items-center justify-between border-t border-gray-300 pt-3">
+                        <span class="font-bold">降水強度:</span>
+                        <span class="${weather.warning ? 'text-[var(--color-red)] font-bold' : ''}">${weather.rain} mm/h (${defaultLocation}付近)</span>
+                    </div>
+                    
+                    <div class="text-xs text-gray-600 mt-1 italic">
+                        ※このAPIは未来の予報・気温・降水確率を提供しません。
+                    </div>
+
+                    <!-- 経路・時間検索 -->
+                    <div class="mt-4">
+                        <p class="font-bold mb-1 border-t pt-3">🚗 経路・所要時間情報:</p>
+                        <p class="text-sm bg-white p-2 ink-border text-gray-700 italic">
+                            正確な所要時間を検索するAPI連携がないため、情報はありません。
+                            <span class="block text-xs text-gray-600 mt-1">目的地: ${event.location || '未定'}</span>
                         </p>
                     </div>
                 </div>
@@ -569,51 +577,18 @@
 
 
         // =======================================================
-        // 3. 外部情報連携 (リアル/モック)
+        // 3. 外部情報連携 (リアルデータのみ)
         // =======================================================
-
-        /**
-         * モックの経路・時間検索 (新浦安駅起点)
-         * @param {string} destination - 目的地
-         * @returns {{time: string, route: string}}
-         */
-        function getMockRouteInfo(destination) {
-            if (!destination) {
-                return { time: '場所が未入力です', route: '経路情報なし' };
-            }
-            const hash = destination.length % 5;
-            let time, route;
-            switch (hash) {
-                case 0:
-                    time = '電車で約45分 (乗換1回)';
-                    route = `${defaultLocation} → (JR京葉線) → 〇〇駅`;
-                    break;
-                case 1:
-                    time = 'バスで約20分 (直行)';
-                    route = `${defaultLocation} バス停 → 目的地周辺`;
-                    break;
-                case 2:
-                    time = '徒歩で約5分';
-                    route = `目的地は${defaultLocation}の近隣です`;
-                    break;
-                case 3:
-                    time = '電車とバスで約1時間15分 (乗換2回)';
-                    route = `${defaultLocation} → (JR線) → 〇〇駅 → (バス) → 目的地`;
-                    break;
-                default:
-                    time = '電車で約30分 (乗換なし)';
-                    route = `${defaultLocation} → (JR線) → 目的地駅`;
-                    break;
-            }
-            return { time, route };
-        }
 
         /**
          * 外部API (Yahoo V1/place) からリアルタイム降水強度を取得
          * @returns {Promise<number>} - 降水強度 (mm/h)。失敗時は0を返す。
          */
         async function getRealTimeRainfall() {
-            if (!YAHOO_APP_ID) return 0;
+            if (!YAHOO_APP_ID) {
+                console.error("Yahoo App IDが未設定のため、天気APIを呼び出せません。");
+                return 0;
+            }
 
             try {
                 let response = null;
@@ -641,71 +616,54 @@
         }
 
         /**
-         * 予定の日時に基づく天気予報を取得 (リアル降水 + モック予報)
-         * @param {Date} date - 予定の日時
-         * @param {string} location - 予定の場所
-         * @returns {Promise<{icon: string, condition: string, temp: number, rain: number, warning: boolean}>}
+         * 現在のリアルタイム天気ステータスを取得 (Yahoo V1/place APIに依存)
+         * このAPIは未来の予報や気温、経路情報を提供しないため、降水強度のみを正確に表示します。
+         * @param {Date} date - 予定の日時 (現在時刻と比較し、リアルタイム情報を使用するか判断)
+         * @returns {Promise<{icon: string, condition: string, rain: number, warning: boolean}>}
          */
-        async function getWeatherForecast(date, location) {
-            const isFuture = date.getTime() > new Date().getTime();
+        async function getRealTimeWeatherStatus(date) {
+            const isPast = date.getTime() < new Date().getTime();
             let realRainfall = 0;
 
-            // 予定が未来の場合、リアルタイムの降水強度を取得
-            if (isFuture) {
+            // 過去の予定の場合はAPI呼び出しを行わない（過去のリアルタイム情報は取得不能なため）
+            if (!isPast) {
                 realRainfall = await getRealTimeRainfall();
             }
             
-            // --- モック予報ロジック (Yahoo APIが提供しない PoP/Temp/未来の条件) ---
-            const dayOfMonth = date.getDate();
-            const hour = date.getHours();
-            let condition, icon, rain, temp, warning = false;
+            let condition, icon, warning = false;
 
-            // リアルタイム降水強度を基に、雨の警告を決定
-            if (realRainfall > 5) {
-                // 強雨 (5mm/h以上) の場合、リアルタイムで警告を出す
-                condition = '強雨 (リアルタイム)';
-                icon = '⚠️'; 
-                rain = realRainfall;
-                temp = 15;
+            if (isPast) {
+                condition = '過去の予定';
+                icon = '🕰️';
+                realRainfall = 0; 
+            } else if (realRainfall > 15) {
+                // 豪雨 (15mm/h超)
+                condition = '豪雨';
+                icon = '🚨'; 
                 warning = true;
-            } else if (realRainfall > 0) {
-                // 弱雨 (0-5mm/h)
-                condition = '弱雨 (リアルタイム)';
+            } else if (realRainfall > 5) {
+                // 強雨 (5mm/h超)
+                condition = '強雨';
+                icon = '⚠️'; 
+                warning = true;
+            } else if (realRainfall > 0.5) {
+                // 雨 (0.5mm/h超)
+                condition = '雨';
                 icon = '☔';
-                rain = realRainfall;
-                temp = 18;
-            } 
-            // リアルタイム降水がない場合、または過去の予定の場合、モック予報にフォールバック
-            else {
-                // モック予報
-                if (dayOfMonth % 7 === 0) {
-                    condition = '大雨 (予報モック)';
-                    icon = '🌧️';
-                    rain = 80; // モックの降水確率
-                    temp = 18;
-                    warning = true;
-                } else if (dayOfMonth % 3 === 0) {
-                    condition = '曇り (予報モック)';
-                    icon = '☁️';
-                    rain = 10;
-                    temp = 25;
-                } else {
-                    condition = '晴れ (予報モック)';
-                    icon = '☀️';
-                    rain = 0;
-                    temp = (hour < 10 || hour > 18) ? 20 : 28;
-                }
+            } else if (realRainfall > 0) {
+                // 弱雨 (0.5mm/h以下)
+                condition = '微弱な降水';
+                icon = '💧';
+            } else {
+                // 降水なし
+                condition = '降水なし';
+                icon = '☀️'; // 降水がなければ晴れアイコンを使用 (予報ではない)
             }
 
-            // リアルタイム降水強度を使用する場合、数値を小数点以下1桁に丸める
-            if (realRainfall > 0 && isFuture) {
-                rain = Math.round(realRainfall * 10) / 10;
-            } else if (!isFuture && realRainfall === 0) {
-                // 過去の予定の場合、モックの降水確率/強度は0とする
-                rain = 0;
-            }
+            // 数値を小数点以下1桁に丸める
+            const roundedRainfall = Math.round(realRainfall * 10) / 10;
 
-            return { icon, condition, temp, rain, warning };
+            return { icon, condition, rain: roundedRainfall, warning };
         }
 
         // =======================================================
