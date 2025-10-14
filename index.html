@@ -338,9 +338,11 @@
             // 確認モーダルの代わりにカスタムメッセージボックスを使用
             showCustomMessageBox('確認', 'この予定を削除しますか？', () => {
                 appData.schedules = appData.schedules.filter(e => e.id !== id);
+                // --- 修正箇所: データのフィルタリング後に保存と再レンダリングを呼び出す ---
                 saveData(); 
                 closeModal();
                 renderView(appData.currentView);
+                // ----------------------------------------------------------------------
             });
         }
 
@@ -558,11 +560,18 @@
                 <div class="flex justify-between mt-6">
                     <button onclick="showEventForm(${event.id})" class="steamboat-button bg-[var(--color-yellow)] text-black px-4 py-2 ink-border font-bold">編集</button>
                     ${isTask ? `<button onclick="toggleTask(${event.id})" class="steamboat-button bg-green-500 text-white px-4 py-2 ink-border font-bold">${event.completed ? '未完了に戻す' : '完了として記録'}</button>` : ''}
-                    <button onclick="deleteEvent(${event.id})" class="steamboat-button bg-gray-800 text-white px-4 py-2 ink-border font-bold">削除</button>
+                    <button id="deleteBtn" data-event-id="${event.id}" class="steamboat-button bg-gray-800 text-white px-4 py-2 ink-border font-bold">削除</button>
                 </div>
             `;
             // 再度モーダルを開く (ローディング画面の上書き)
             openModal(detailHtml);
+            
+            // --- 修正箇所: 削除ボタンにイベントリスナーを追加 ---
+            document.getElementById('deleteBtn').addEventListener('click', function() {
+                const eventId = parseInt(this.getAttribute('data-event-id'));
+                deleteEvent(eventId);
+            });
+            // --------------------------------------------------
         }
 
         /**
@@ -577,11 +586,25 @@
                 <h2 class="text-xl font-extrabold ink-border-b pb-2 mb-4">${title}</h2>
                 <p class="mb-6">${message}</p>
                 <div class="flex justify-end space-x-4">
-                    <button onclick="closeModal(); ${onCancel ? onCancel.name + '()' : ''}" class="steamboat-button bg-gray-200 text-black px-4 py-2 ink-border">キャンセル</button>
-                    <button onclick="${onConfirm.name}(); closeModal();" class="steamboat-button bg-[var(--color-red)] text-white px-4 py-2 ink-border shadow-md">OK</button>
+                    <button id="messageBoxCancelBtn" class="steamboat-button bg-gray-200 text-black px-4 py-2 ink-border">キャンセル</button>
+                    <button id="messageBoxConfirmBtn" class="steamboat-button bg-[var(--color-red)] text-white px-4 py-2 ink-border shadow-md">OK</button>
                 </div>
             `;
             openModal(messageBoxHtml);
+
+            // --- 修正箇所: イベントリスナー方式に変更し、onConfirm関数を確実に実行 ---
+            document.getElementById('messageBoxConfirmBtn').addEventListener('click', () => {
+                closeModal();
+                onConfirm(); // 渡されたコールバック関数 (deleteEvent) を実行
+            });
+            
+            document.getElementById('messageBoxCancelBtn').addEventListener('click', () => {
+                closeModal();
+                if (onCancel && onCancel !== closeModal) {
+                    onCancel();
+                }
+            });
+            // --------------------------------------------------------------------------
         }
 
 
