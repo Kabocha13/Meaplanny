@@ -1,1 +1,3 @@
 # Meaplanny
+
+https://openweathermap.org/
