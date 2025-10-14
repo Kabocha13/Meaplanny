@@ -132,19 +132,23 @@
         // 0. 初期設定とユーティリティ
         // =======================================================
 
-        const defaultLocation = '新浦安駅'; // API座標の参照場所
+        // OpenWeatherMap API仕様に基づいて更新
+        const defaultLocation = '新浦安駅'; // デフォルトの場所を新浦安駅に変更
+        const DEFAULT_LAT = '35.6517';      // 新浦安駅付近の緯度
+        const DEFAULT_LON = '139.9079';     // 新浦安駅付近の経度
+        
+        // ユーザー提供のAPIキーを設定
+        const WEATHER_API_KEY = 'ffa3590bb2f3c1f712a6abbc1ebdccea'; 
+        
+        // APIエンドポイント
+        const WEATHER_API_URL = 'https://api.openweathermap.org/data/2.5/forecast/daily';
+        const GEO_API_URL = 'http://api.openweathermap.org/geo/1.0/direct';
+
 
         // JSON Bin 設定
         const BIN_ID = '68e4a432ae596e708f08d474';
         const X_MASTER_KEY = '$2a$10$jXqWaOsnNAUVPbvzX4ytFeZoXohqmbWD20InKtsiIQr3.vkgXzj36';
         
-        // Yahoo! 天気 API 設定 (リアルタイム降水強度のみ取得可能)
-        const YAHOO_APP_ID = 'dj00aiZpPXB4WG9iY09wSm5xWCZzPWNvbnN1bWVyc2VjcmV0Jng9YTY-'; // ユーザー提供のApp ID
-        // 新浦安駅付近の座標 (経度, 緯度)
-        const SHIN_URAYASU_COORDS = '139.9079,35.6517'; 
-        const YAHOO_WEATHER_URL = `https://map.yahooapis.jp/weather/V1/place?coordinates=${SHIN_URAYASU_COORDS}&output=json&appid=${YAHOO_APP_ID}`;
-
-
         if (!BIN_ID || !X_MASTER_KEY) {
             console.error("【設定エラー】JSON Binキーが設定されていません。アプリは空のデータで動作します。");
         }
@@ -494,15 +498,13 @@
                 <h2 class="text-2xl font-extrabold ink-border-b pb-2 mb-4">${event.title}</h2>
                 <div class="text-center py-8">
                     <p class="font-bold">情報をロード中...</p>
-                    <p class="text-sm italic text-gray-600">（リアルタイム天気連携）</p>
+                    <p class="text-sm italic text-gray-600">（天気予報、経路情報連携）</p>
                 </div>
             `);
 
-            // リアルタイム天気ステータスを取得
-            const weather = await getRealTimeWeatherStatus(start); 
-
-            const weatherWarning = weather.warning ? 'bg-[var(--color-red)] text-white font-bold p-1 rounded-sm' : 'text-black bg-gray-200';
-
+            // 予定開始日の天気予報を取得 (場所情報を含む)
+            const weather = await fetchWeatherForecast(start, event.location); 
+            
             const detailHtml = `
                 <h2 class="text-2xl font-extrabold ink-border-b pb-2 mb-4">${event.title}</h2>
                 <p class="text-sm text-gray-600 mb-4">${isTask ? 'タスク' : '予定'}</p>
@@ -514,26 +516,33 @@
                     ${event.notes ? `<p class="font-bold border-t pt-3">📝 備考:</p><p class="whitespace-pre-wrap">${event.notes}</p>` : ''}
                 </div>
 
-                <!-- 外部情報連携 (リアルデータのみ) -->
+                <!-- 外部情報連携 (天気予報と経路情報) -->
                 <div class="ink-border p-3 mt-4 bg-gray-100">
-                    <h3 class="font-extrabold text-lg ink-border-b border-dashed pb-2 mb-3">リアルタイム情報連携</h3>
+                    <h3 class="font-extrabold text-lg ink-border-b border-dashed pb-2 mb-3">天気・経路情報連携</h3>
 
-                    <!-- 天気情報 (Yahoo V1/place はリアルタイム降水強度のみ提供) -->
-                    <div class="flex items-center justify-between mb-3">
-                        <span class="font-bold">現在の降水ステータス:</span>
-                        <div class="flex items-center space-x-2 ${weatherWarning}">
-                            <span class="weather-icon text-2xl">${weather.icon}</span>
-                            <span>${weather.condition}</span>
+                    <!-- 天気情報 -->
+                    <div class="space-y-2">
+                        <div class="flex items-center justify-between">
+                            <span class="font-bold">天気予報 (日中):</span>
+                            <div class="flex items-center space-x-2 ${weather.warning ? 'bg-[var(--color-red)] text-white font-bold p-1 rounded-sm' : 'text-black bg-gray-200'}">
+                                <span class="weather-icon text-2xl">${weather.icon}</span>
+                                <span>${weather.condition}</span>
+                            </div>
+                        </div>
+
+                        <div class="flex items-center justify-between border-t border-gray-300 pt-2">
+                            <span class="font-bold">予想最高気温:</span>
+                            <span class="${weather.warning ? 'text-[var(--color-red)] font-bold' : ''}">${weather.maxTemp}°C</span>
+                        </div>
+                        
+                        <div class="flex items-center justify-between border-t border-gray-300 pt-2">
+                            <span class="font-bold">予想降水確率:</span>
+                            <span class="${weather.warning ? 'text-[var(--color-red)] font-bold' : ''}">${weather.precipitation}</span>
                         </div>
                     </div>
 
-                    <div class="flex items-center justify-between border-t border-gray-300 pt-3">
-                        <span class="font-bold">降水強度:</span>
-                        <span class="${weather.warning ? 'text-[var(--color-red)] font-bold' : ''}">${weather.rain} mm/h (${defaultLocation}付近)</span>
-                    </div>
-                    
                     <div class="text-xs text-gray-600 mt-1 italic">
-                        ※このAPIは未来の予報・気温・降水確率を提供しません。
+                        ※データは${weather.locationName}付近のものです。
                     </div>
 
                     <!-- 経路・時間検索 -->
@@ -577,94 +586,231 @@
 
 
         // =======================================================
-        // 3. 外部情報連携 (リアルデータのみ)
+        // 3. 外部情報連携 (OpenWeatherMap API)
         // =======================================================
 
         /**
-         * 外部API (Yahoo V1/place) からリアルタイム降水強度を取得
-         * @returns {Promise<number>} - 降水強度 (mm/h)。失敗時は0を返す。
+         * 場所の文字列から緯度と経度を取得する (OpenWeatherMap Geocoding API)
+         * @param {string} locationName - 検索する場所の名前
+         * @returns {Promise<{lat: string, lon: string, name: string, status: string}>} - 緯度、経度、都市名、ステータスのオブジェクト
          */
-        async function getRealTimeRainfall() {
-            if (!YAHOO_APP_ID) {
-                console.error("Yahoo App IDが未設定のため、天気APIを呼び出せません。");
-                return 0;
+        async function getCoordsFromLocation(locationName) {
+            // 場所が未入力の場合、デフォルト（新浦安駅）の座標と名前を返す
+            if (!locationName || locationName.trim() === '') {
+                console.log("場所が未入力です。デフォルト座標（新浦安駅）を使用します。");
+                return { lat: DEFAULT_LAT, lon: DEFAULT_LON, name: defaultLocation, status: 'default' };
             }
 
+            const limit = 1;
+            const geoApiUrl = `${GEO_API_URL}?q=${encodeURIComponent(locationName)}&limit=${limit}&appid=${WEATHER_API_KEY}`;
+            
+            try {
+                const response = await fetch(geoApiUrl);
+                if (!response.ok) throw new Error(`Geocoding API HTTP Error: ${response.status}`);
+                
+                const data = await response.json();
+                
+                if (data && data.length > 0) {
+                    const result = data[0];
+                    // 都市名、国名、都道府県名などを結合して表示名を作成
+                    const name = `${result.name}${result.state ? `, ${result.state}` : ''}${result.country ? ` (${result.country})` : ''}`;
+                    return { 
+                        lat: result.lat.toFixed(4), 
+                        lon: result.lon.toFixed(4), 
+                        name: name,
+                        status: 'success'
+                    };
+                }
+            } catch (e) {
+                console.error("Geocoding APIからの座標取得に失敗しました。デフォルト座標を使用します。", e);
+            }
+            
+            // 失敗または見つからない場合は、エラーフラグを付けてデフォルトを返す
+            console.log(`場所「${locationName}」の座標が見つかりませんでした。デフォルト座標（新浦安駅）を使用します。`);
+            return { lat: DEFAULT_LAT, lon: DEFAULT_LON, name: locationName, status: 'not_found' };
+        }
+        
+        /**
+         * OpenWeatherMap APIから予定日の予報データを取得
+         * @param {Date} date - 予定の日時
+         * @param {string} location - 予定の場所の文字列
+         * @returns {Promise<{icon: string, condition: string, maxTemp: string, precipitation: string, warning: boolean, locationName: string}>}
+         */
+        async function fetchWeatherForecast(date, location) {
+            const now = new Date();
+            const isPast = date.getTime() < now.getTime();
+            
+            // 1. 場所から緯度・経度を取得
+            const coords = await getCoordsFromLocation(location);
+
+            // 過去の予定の場合は「過去の予定」として返す
+            if (isPast) {
+                 return { 
+                    icon: '🕰️', 
+                    condition: '過去の予定', 
+                    maxTemp: 'N/A', 
+                    precipitation: 'N/A', 
+                    warning: false,
+                    locationName: coords.name 
+                };
+            }
+
+            // APIキーがない場合はエラーを返す
+            if (!WEATHER_API_KEY) {
+                console.error("【APIエラー】OpenWeatherMap APIキーが未設定です。");
+                 return { 
+                    icon: '❗', 
+                    condition: 'APIキー設定エラー', 
+                    maxTemp: 'N/A', 
+                    precipitation: 'N/A', 
+                    warning: true,
+                    locationName: coords.name
+                };
+            }
+
+            // 2. 場所が見つからなかった場合の特別な処理
+            if (coords.status === 'not_found') {
+                 return { 
+                    icon: '🔍', 
+                    condition: '場所不明のため予報不可', 
+                    maxTemp: 'N/A', 
+                    precipitation: 'N/A', 
+                    warning: true,
+                    locationName: `${coords.name} (場所が見つかりませんでした)`
+                };
+            }
+            
+            // 3. 天気予報APIを呼び出し
+            const apiEndpoint = `${WEATHER_API_URL}?lat=${coords.lat}&lon=${coords.lon}&cnt=16&appid=${WEATHER_API_KEY}`;
+            
             try {
                 let response = null;
-                for (let i = 0; i < 2; i++) {
-                    response = await fetch(YAHOO_WEATHER_URL);
+                // 指数バックオフ付きリトライ
+                for (let i = 0; i < 3; i++) {
+                    response = await fetch(apiEndpoint);
                     if (response.ok) break; 
                     const delay = Math.pow(2, i) * 1000;
                     await new Promise(resolve => setTimeout(resolve, delay));
                 }
 
-                if (!response.ok) throw new Error(`Yahoo API HTTP Error: ${response.status}`);
+                if (!response.ok) {
+                    throw new Error(`OpenWeatherMap API HTTP Error: ${response.status}`);
+                }
                 
                 const data = await response.json();
-                const feature = data.Feature?.[0];
                 
-                if (feature && feature.Property && feature.Property.WeatherList && feature.Property.WeatherList.Weather) {
-                    // 直近の降水強度 (mm/h) を取得
-                    const latestWeather = feature.Property.WeatherList.Weather[0];
-                    return parseFloat(latestWeather.Rainfall) || 0;
+                if (!data.list || data.list.length === 0) {
+                     throw new Error("APIレスポンスに予報データがありませんでした。");
                 }
+
+                // 予定日と一致する予報データを検索 (日単位)
+                const targetDay = formatDate(date);
+                const targetForecast = data.list.find(dayData => {
+                    // APIのdtはUNIXタイムスタンプ（秒）
+                    const forecastDate = new Date(dayData.dt * 1000);
+                    return formatDate(forecastDate) === targetDay;
+                });
+
+                if (!targetForecast) {
+                    // APIがカバーする16日間の予報期間外の場合
+                    return { 
+                        icon: '❓', 
+                        condition: '予報期間外', 
+                        maxTemp: 'N/A', 
+                        precipitation: 'N/A', 
+                        warning: false,
+                        locationName: coords.name
+                    };
+                }
+
+                // ケルビンを摂氏に変換 (K - 273.15)
+                const maxTempC = (targetForecast.temp.max - 273.15).toFixed(0);
+                
+                // 降水量 (mm) を取得 (Daily APIの標準フィールド)
+                const rainVolume = targetForecast.rain || 0; 
+                
+                // OpenWeatherMapのアイコンIDに基づいてアイコンと状態を決定
+                const weatherId = targetForecast.weather[0].id;
+                const { icon, condition, warning } = getWeatherIconAndCondition(weatherId, rainVolume);
+
+                // 場所名がデフォルトの場合、特別に「新浦安駅付近のものです」と明記する
+                const displayLocationName = coords.status === 'default' ? `${coords.name}付近のものです` : `${coords.name}`;
+
+                return { 
+                    icon, 
+                    condition, 
+                    maxTemp: maxTempC, 
+                    precipitation: getPrecipitationDisplay(rainVolume), // 降水量から確率表示へ変換
+                    warning,
+                    locationName: displayLocationName
+                };
+
             } catch (e) {
-                console.error("Yahoo!天気APIからのデータ取得に失敗しました (リアルタイム降水は0mm/hとして処理):", e);
+                console.error("OpenWeatherMapからのデータ取得に失敗しました:", e);
+                return { 
+                    icon: '❌', 
+                    condition: '取得失敗', 
+                    maxTemp: 'N/A', 
+                    precipitation: 'N/A', 
+                    warning: true,
+                    locationName: coords.name
+                };
             }
-            return 0; 
         }
 
         /**
-         * 現在のリアルタイム天気ステータスを取得 (Yahoo V1/place APIに依存)
-         * このAPIは未来の予報や気温、経路情報を提供しないため、降水強度のみを正確に表示します。
-         * @param {Date} date - 予定の日時 (現在時刻と比較し、リアルタイム情報を使用するか判断)
-         * @returns {Promise<{icon: string, condition: string, rain: number, warning: boolean}>}
+         * OpenWeatherMapのIDと降水量に基づいて、アイコン、状態、警告を決定
+         * @param {number} id - OpenWeatherMapの天気ID
+         * @param {number} rainVolume - 予想降水量 (mm)
+         * @returns {{icon: string, condition: string, warning: boolean}}
          */
-        async function getRealTimeWeatherStatus(date) {
-            const isPast = date.getTime() < new Date().getTime();
-            let realRainfall = 0;
+        function getWeatherIconAndCondition(id, rainVolume) {
+            let icon = '❓';
+            let condition = '不明';
+            let warning = false;
 
-            // 過去の予定の場合はAPI呼び出しを行わない（過去のリアルタイム情報は取得不能なため）
-            if (!isPast) {
-                realRainfall = await getRealTimeRainfall();
+            if (id >= 200 && id < 300) { // Thunderstorm
+                icon = '⛈️'; condition = '雷雨'; warning = true;
+            } else if (id >= 300 && id < 500) { // Drizzle
+                icon = '🌧️'; condition = '霧雨';
+            } else if (id >= 500 && id < 600) { // Rain
+                icon = '☔'; condition = (rainVolume > 10) ? '強雨' : '雨';
+                if (rainVolume > 5) warning = true;
+            } else if (id >= 600 && id < 700) { // Snow
+                icon = '❄️'; condition = '雪';
+            } else if (id >= 700 && id < 800) { // Atmosphere (Mist, Smoke, Haze etc.)
+                icon = '🌫️'; condition = '霧';
+            } else if (id === 800) { // Clear
+                icon = '☀️'; condition = '快晴';
+            } else if (id === 801 || id === 802) { // Few Clouds
+                icon = '🌤️'; condition = '晴れ時々曇り';
+            } else if (id === 803 || id === 804) { // Scattered/Broken Clouds
+                icon = '☁️'; condition = '曇り';
             }
             
-            let condition, icon, warning = false;
-
-            if (isPast) {
-                condition = '過去の予定';
-                icon = '🕰️';
-                realRainfall = 0; 
-            } else if (realRainfall > 15) {
-                // 豪雨 (15mm/h超)
-                condition = '豪雨';
-                icon = '🚨'; 
+            // 降水確率/降水量が特に高い場合は警告を出す
+            if (rainVolume > 15) {
+                condition = '大雨警報';
                 warning = true;
-            } else if (realRainfall > 5) {
-                // 強雨 (5mm/h超)
-                condition = '強雨';
-                icon = '⚠️'; 
-                warning = true;
-            } else if (realRainfall > 0.5) {
-                // 雨 (0.5mm/h超)
-                condition = '雨';
-                icon = '☔';
-            } else if (realRainfall > 0) {
-                // 弱雨 (0.5mm/h以下)
-                condition = '微弱な降水';
-                icon = '💧';
-            } else {
-                // 降水なし
-                condition = '降水なし';
-                icon = '☀️'; // 降水がなければ晴れアイコンを使用 (予報ではない)
             }
 
-            // 数値を小数点以下1桁に丸める
-            const roundedRainfall = Math.round(realRainfall * 10) / 10;
-
-            return { icon, condition, rain: roundedRainfall, warning };
+            return { icon, condition, warning };
         }
+
+        /**
+         * 降水量から降水確率の表示を生成 (OpenWeatherMap Daily APIの制約のため)
+         * 実際は降水確率フィールドがないため、降水量を確率の代替として表示。
+         * @param {number} rainVolume - 予想降水量 (mm)
+         * @returns {string}
+         */
+        function getPrecipitationDisplay(rainVolume) {
+             if (rainVolume === 0 || rainVolume === undefined) return '0%';
+             if (rainVolume > 10) return '80% 以上 (強雨)';
+             if (rainVolume > 3) return '50 - 80% (中雨)';
+             if (rainVolume > 0.5) return '20 - 50% (弱雨)';
+             return '20% 未満 (微量)';
+        }
+
 
         // =======================================================
         // 4. 高度な時間管理機能 (スロット分析)
@@ -688,7 +834,10 @@
                 .filter(e => e.type === 'schedule' || e.type === 'task')
                 .filter(e => {
                     const start = new Date(e.start);
-                    return start >= dayStart && start < new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+                    // 比較を簡単にするために、日付部分のみを比較
+                    const eventDayStr = formatDate(start);
+                    const targetDayStr = formatDate(dayStart);
+                    return eventDayStr === targetDayStr;
                 })
                 .map(e => ({
                     start: new Date(e.start),
@@ -700,15 +849,25 @@
             const minSlotDuration = 30 * 60 * 1000; // 30分以上の空き
 
             for (const booked of bookedTimes) {
-                const gapDuration = booked.start.getTime() - currentCheckTime.getTime();
+                // 予定の開始時刻が分析期間の開始時刻より遅い場合のみ考慮
+                const gapStart = new Date(Math.max(currentCheckTime.getTime(), dayStart.getTime()));
+                
+                // 予定が分析期間内に収まっているかチェック
+                if (booked.start.getTime() >= dayEnd.getTime()) {
+                     // 予定が日の終わりに達しているか、超えている場合はループを抜ける
+                    break;
+                }
+
+                const gapDuration = booked.start.getTime() - gapStart.getTime();
 
                 // 予定と予定の間、または一日の始まりと最初の予定の間に空きがあるか
                 if (gapDuration >= minSlotDuration) {
                     slots.push({
-                        start: currentCheckTime,
+                        start: gapStart,
                         end: booked.start
                     });
                 }
+                
                 // チェック開始時間を現在の予定の終了時刻に進める (重複考慮のため)
                 if (booked.end.getTime() > currentCheckTime.getTime()) {
                     currentCheckTime = booked.end;
@@ -718,8 +877,10 @@
             // 最後の予定の終了時刻から一日の終わりまでの空き
             const endGapDuration = dayEnd.getTime() - currentCheckTime.getTime();
             if (endGapDuration >= minSlotDuration) {
+                // 確保された空き時間の開始時刻が一日の開始時刻より遅いことを保証
+                const slotStart = new Date(Math.max(currentCheckTime.getTime(), dayStart.getTime()));
                 slots.push({
-                    start: currentCheckTime,
+                    start: slotStart,
                     end: dayEnd
                 });
             }
