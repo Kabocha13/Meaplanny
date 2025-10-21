@@ -1022,7 +1022,7 @@ function renderView(view) {
     viewContainer.innerHTML = ''; // コンテンツをクリア
 
     const headerHtml = (title) => `
-        <div class="flex justify-between items-center mb-4 ink-border p-2 bg-white">
+        <div class="flex justify-between items-center mb-2 ink-border p-2 bg-white">
             <button onclick="window.changeDate(-1)" class="text-2xl steamboat-button">◀</button>
             <h2 class="text-xl font-extrabold">${title}</h2>
             <button onclick="window.changeDate(1)" class="text-2xl steamboat-button">▶</button>
@@ -1067,7 +1067,7 @@ function renderMonthView(headerHtml) {
 
     // ヘッダーと日付タイトル
     viewContainer.innerHTML = `
-        <div class="p-4">
+        <div class="p-2">
             ${headerHtml(`${year}年${month + 1}月`)}
         </div>
     `;
@@ -1177,7 +1177,7 @@ function renderWeekView(headerHtml) {
 
     // ヘッダー
     viewContainer.innerHTML = `
-        <div class="p-4">
+        <div class="p-2">
             ${headerHtml(`週間 ${weekDates[0].getMonth() + 1}/${weekDates[0].getDate()} - ${weekDates[6].getMonth() + 1}/${weekDates[6].getDate()}`)}
         </div>
     `;
