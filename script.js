@@ -291,7 +291,7 @@ window.duplicateEvent = function(id) {
 
     // 複製されたイベントのデータを準備（IDは付けないため、新規として保存される）
     const duplicatedData = {
-        // ★★★ 修正箇所: タイトルから「 (コピー)」を削除 ★★★
+        // タイトルは元の予定と同じものを設定
         title: originalEvent.title,
         type: originalEvent.type,
         // 日時は元の予定と同じものを設定し、編集画面で変更してもらう
@@ -1551,6 +1551,13 @@ window.handleTouchStart = function(e) {
             if (draggedEventData) {
                 // ロングプレスが成立した場合、ドラッグを開始する
                 draggedEventData.isDragging = true;
+                
+                // ★★★ 修正箇所: ドラッグ開始時に触覚フィードバックを追加 ★★★
+                if ('vibrate' in navigator) {
+                    navigator.vibrate(50); // 50ms振動させる
+                }
+                // ★★★ 修正ここまで ★★★
+
                 eventElement.classList.add('dragging');
     
                 // 視覚的なフィードバック用のクローンを作成
