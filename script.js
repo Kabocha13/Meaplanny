@@ -278,6 +278,42 @@ function toggleTask(id) {
     }
 }
 
+/**
+ * 既存の予定を複製し、編集画面を開いて日時を選択できるようにする
+ * @param {number} id - 複製するイベントのID
+ */
+window.duplicateEvent = function(id) {
+    const originalEvent = appData.schedules.find(e => e.id === id);
+    if (!originalEvent) return;
+
+    // 元の開始日時を取得 (複製フォームの初期日時として使用)
+    const originalStart = new Date(originalEvent.start);
+
+    // 複製されたイベントのデータを準備（IDは付けないため、新規として保存される）
+    const duplicatedData = {
+        // ★★★ 修正箇所: タイトルから「 (コピー)」を削除 ★★★
+        title: originalEvent.title,
+        type: originalEvent.type,
+        // 日時は元の予定と同じものを設定し、編集画面で変更してもらう
+        start: originalStart.toISOString(),
+        end: originalEvent.end,
+        location: originalEvent.location,
+        notes: originalEvent.notes,
+        tag: originalEvent.tag,
+        completed: false, // 複製は常に未完了からスタート
+        actualEnd: null,
+    };
+    
+    // 現在開いている詳細モーダルを閉じる
+    closeModal();
+
+    // 複製データを使用して新規作成フォームを開く
+    // showEventForm(id, initialDate, prefillData)
+    // IDはnull (新規作成)、initialDateは元の予定の日付、prefillDataに複製データを渡す
+    showEventForm(null, originalStart, duplicatedData);
+}
+
+
 // =======================================================
 // 2. モーダル/UI処理
 // =======================================================
@@ -310,22 +346,29 @@ modalOverlay.addEventListener('click', (e) => {
  * イベント登録/編集フォームの表示
  * @param {number|null} id - 編集の場合はID, 新規の場合はnull
  * @param {Date} [initialDate] - 新規作成時の初期日付
+ * @param {Object|null} [prefillData=null] - 複製時などに使用する事前入力データ
  */
-function showEventForm(id = null, initialDate = appData.currentDate) {
+function showEventForm(id = null, initialDate = appData.currentDate, prefillData = null) {
     const event = id ? appData.schedules.find(e => e.id === id) : null;
-    const isTask = event ? event.type === 'task' : false;
+    
+    // データ源の決定: 編集対象, 複製データ, または新規作成
+    const data = event || prefillData;
+    
+    const isTask = data ? data.type === 'task' : false;
     // タグが未設定の場合は'white'をデフォルトとする
-    const currentTag = event ? event.tag : 'white';
+    const currentTag = data ? data.tag : 'white';
 
     const now = new Date();
+    // 新規作成時のデフォルト日時計算
     const defaultStart = new Date(initialDate.getFullYear(), initialDate.getMonth(), initialDate.getDate(), now.getHours() + 1, 0);
     const defaultEnd = new Date(defaultStart.getTime() + 60 * 60 * 1000);
 
-    const startTime = event ? new Date(event.start) : defaultStart;
-    const endTime = event ? new Date(event.end) : defaultEnd;
+    // 開始/終了日時の決定: 複製/編集データから取得、または新規デフォルト
+    const startTime = data ? new Date(data.start) : defaultStart;
+    const endTime = data ? new Date(data.end) : defaultEnd;
 
     const formHtml = `
-        <h2 class="text-xl font-extrabold ink-border-b pb-2 mb-4">${id ? '予定を編集' : '新しい予定/タスク'}</h2>
+        <h2 class="text-xl font-extrabold ink-border-b pb-2 mb-4">${id ? '予定を編集' : (prefillData ? '予定を複製・編集' : '新しい予定/タスク')}</h2>
         <form id="event-form">
             <input type="hidden" name="id" value="${id || ''}">
 
@@ -343,7 +386,7 @@ function showEventForm(id = null, initialDate = appData.currentDate) {
 
             <div class="mb-4">
                 <label for="title" class="block mb-1 font-bold">タイトル</label>
-                <input type="text" id="title" name="title" value="${event ? event.title : ''}"
+                <input type="text" id="title" name="title" value="${data ? data.title : ''}"
                        class="ink-border p-2 w-full" placeholder="タイトルを入力" required>
             </div>
 
@@ -363,7 +406,7 @@ function showEventForm(id = null, initialDate = appData.currentDate) {
             <!-- ユーザーの要望により、タスク選択時に非表示にする場所フィールド -->
             <div id="location-field-container" class="mb-4">
                 <label for="location" class="block mb-1 font-bold">場所</label>
-                <input type="text" id="location" name="location" value="${event ? event.location || '' : ''}"
+                <input type="text" id="location" name="location" value="${data ? data.location || '' : ''}"
                        class="ink-border p-2 w-full" placeholder="場所（任意）">
             </div>
 
@@ -383,7 +426,7 @@ function showEventForm(id = null, initialDate = appData.currentDate) {
 
             <div id="notes-field" class="mb-4">
                 <label for="notes" class="block mb-1 font-bold">備考</label>
-                <textarea id="notes" name="notes" class="ink-border p-2 w-full" rows="3" placeholder="詳細、メモ">${event ? event.notes || '' : ''}</textarea>
+                <textarea id="notes" name="notes" class="ink-border p-2 w-full" rows="3" placeholder="詳細、メモ">${data ? data.notes || '' : ''}</textarea>
             </div>
 
             <div class="flex justify-between items-center pt-2 border-t border-gray-300">
@@ -436,8 +479,9 @@ function showEventForm(id = null, initialDate = appData.currentDate) {
             location: location, // タスクの場合は空、予定の場合は入力値
             notes: formData.get('notes'),
             tag: formData.get('tag') || 'white', // ★★★ 追加: タグを保存
-            completed: event ? event.completed : false,
-            actualEnd: event ? event.actualEnd : null,
+            // 完了状態と実際の終了時刻は、編集の場合は元の値を、複製/新規の場合はプリフィルデータまたはデフォルトを使用
+            completed: event ? event.completed : (prefillData ? prefillData.completed : false),
+            actualEnd: event ? event.actualEnd : (prefillData ? prefillData.actualEnd : null),
         };
         saveEvent(data);
     });
@@ -570,12 +614,20 @@ async function showEventDetails(id) {
         <!-- 外部情報連携 (タスクの場合は空) -->
         ${externalInfoContainer}
 
-        <div class="flex justify-between items-center mt-6">
-            <button onclick="window.showEventForm(${event.id})" class="steamboat-button bg-[var(--color-yellow)] text-black px-4 py-2 ink-border font-bold">編集</button>
+        <div class="flex justify-between items-center mt-6 flex-wrap gap-2">
+            <!-- 編集ボタン -->
+            <button onclick="window.showEventForm(${event.id})" class="steamboat-button bg-[var(--color-yellow)] text-black px-4 py-2 ink-border font-bold flex-1 min-w-[45%]">編集</button>
             
-            ${completionButtonHtml}
-            
-            <button id="deleteBtn" data-event-id="${event.id}" class="steamboat-button bg-black text-white px-4 py-2 ink-border font-bold">削除</button>
+            <!-- 複製ボタンを追加 -->
+            <button onclick="window.duplicateEvent(${event.id})" class="steamboat-button bg-[var(--color-red)] text-white px-4 py-2 ink-border font-bold flex-1 min-w-[45%]">複製</button>
+
+            <!-- 完了/ステータス表示 -->
+            <div class="w-full flex justify-between items-center mt-2">
+                ${completionButtonHtml}
+                
+                <!-- 削除ボタン -->
+                <button id="deleteBtn" data-event-id="${event.id}" class="steamboat-button bg-black text-white px-4 py-2 ink-border font-bold">削除</button>
+            </div>
         </div>
     `;
     // ★★★ 完了ボタンのロジック修正ここまで ★★★
@@ -1033,7 +1085,9 @@ function renderMonthView(headerHtml) {
     // 前月の日付埋め
     // bg-gray-50 -> bg-white に変更
     for (let i = 0; i < startDayOfWeek; i++) {
-        html += '<div class="h-20 border border-black bg-white"></div>';
+        // D&Dのドロップターゲットとして機能させるために、空のセルにもクラスを追加
+        const dayStr = formatDate(new Date(year, month, 1 - (startDayOfWeek - i)));
+        html += `<div data-date="${dayStr}" class="time-slot h-20 border border-black bg-white" ondragover="window.handleDragOver(event)" ondrop="window.handleDrop(event, true)" ondragleave="window.handleDragLeave(event)" ondragenter="window.handleDragEnter(event)"></div>`;
     }
 
     // 今月の日付
@@ -1048,7 +1102,7 @@ function renderMonthView(headerHtml) {
             !(e.type === 'task' && e.completed) // 完了済みタスクを除外
         );
         
-        // ★★★ 変更: 黒ベース＋タグ色の帯を適用 ★★★
+        // ★★★ 変更: 黒ベース＋タグ色の帯を適用、D&D属性とタッチイベントハンドラを追加 ★★★
         const eventHtml = events.slice(0, 2).map(e => {
             const tagKey = e.tag || 'black';
             const accentClass = getTagAccentClass(tagKey);
@@ -1057,7 +1111,14 @@ function renderMonthView(headerHtml) {
 
             return `
                 <div onclick="event.stopPropagation(); window.showEventDetails(${e.id})"
-                     class="text-xs truncate px-1 mt-0.5 rounded-sm cursor-pointer bg-black text-white border-l-4 ${accentClass} ${baseClass}"
+                     draggable="true" 
+                     data-event-id="${e.id}"
+                     ondragstart="window.handleDragStart(event)"
+                     ondragend="window.handleDragEnd(event)"
+                     ontouchstart="window.handleTouchStart(event)"
+                     ontouchmove="window.handleTouchMove(event)"
+                     ontouchend="window.handleTouchEnd(event)"
+                     class="event-draggable text-xs truncate px-1 mt-0.5 rounded-sm cursor-pointer bg-black text-white border-l-4 ${accentClass} ${baseClass}"
                      title="${e.title} (${TAG_COLORS[tagKey].label})">
                     ${e.title}
                 </div>
@@ -1066,9 +1127,16 @@ function renderMonthView(headerHtml) {
         // ★★★ 変更ここまで ★★★
 
         const dayClass = isToday ? 'bg-[var(--color-red)] text-white font-extrabold' : 'bg-white text-black';
-        // border-gray-200 -> border-black に変更
+        
+        // 日付セルをドロップターゲットとして設定
         html += `
-            <div class="h-20 border border-black p-0.5 relative cursor-pointer" onclick="window.showEventForm(null, new Date(${year}, ${month}, ${day}))">
+            <div data-date="${dayStr}" 
+                 class="time-slot h-20 border border-black p-0.5 relative cursor-pointer" 
+                 onclick="window.showEventForm(null, new Date(${year}, ${month}, ${day}))"
+                 ondragover="window.handleDragOver(event)" 
+                 ondrop="window.handleDrop(event, true)" 
+                 ondragleave="window.handleDragLeave(event)" 
+                 ondragenter="window.handleDragEnter(event)">
                 <div class="w-6 h-6 rounded-full text-center text-xs flex items-center justify-center ${dayClass}">
                     ${day}
                 </div>
@@ -1078,6 +1146,15 @@ function renderMonthView(headerHtml) {
             </div>
         `;
     }
+
+    // 翌月の日付埋め
+    const totalCells = startDayOfWeek + lastDayOfMonth.getDate();
+    const remainingCells = 42 - totalCells; // 6週間表示（最大42セル）を想定
+    for (let i = 0; i < remainingCells; i++) {
+         const dayStr = formatDate(new Date(year, month + 1, i + 1));
+         html += `<div data-date="${dayStr}" class="time-slot h-20 border border-black bg-white" ondragover="window.handleDragOver(event)" ondrop="window.handleDrop(event, true)" ondragleave="window.handleDragLeave(event)" ondragenter="window.handleDragEnter(event)"></div>`;
+    }
+
 
     html += '</div></div>';
     viewContainer.innerHTML += html;
@@ -1175,25 +1252,38 @@ function renderWeekView(headerHtml) {
                         top = 0;
                     }
 
-                    // ★★★ 変更: 黒ベース＋タグ色の帯を適用 ★★★
+                    // ★★★ D&D機能のため、draggable属性とタッチイベントハンドラを追加 ★★★
                     const tagKey = e.tag || 'black';
                     const accentClass = getTagAccentClass(tagKey);
                     const baseClass = e.completed ? 'opacity-60 line-through' : '';
 
                     eventsHtml += `
                         <div onclick="event.stopPropagation(); window.showEventDetails(${e.id})"
-                            class="absolute w-full px-1 text-xs truncate rounded-sm cursor-pointer z-20 bg-black text-white border-l-4 ${accentClass} ${baseClass}"
+                            draggable="true" 
+                            data-event-id="${e.id}"
+                            ondragstart="window.handleDragStart(event)"
+                            ondragend="window.handleDragEnd(event)"
+                            ontouchstart="window.handleTouchStart(event)"
+                            ontouchmove="window.handleTouchMove(event)"
+                            ontouchend="window.handleTouchEnd(event)"
+                            class="event-draggable absolute w-full px-1 text-xs truncate rounded-sm cursor-pointer z-20 bg-black text-white border-l-4 ${accentClass} ${baseClass}"
                             style="top: ${top}%; height: ${height}%; left: 0px; box-sizing: border-box;"
                             title="${e.title} (${TAG_COLORS[tagKey].label})">
                             ${e.title}
                         </div>
                     `;
-                    // ★★★ 変更ここまで ★★★
+                    // ★★★ D&Dイベント要素の修正ここまで ★★★
                 }
             });
 
+            // ★★★ D&D機能のため、ドロップターゲットの属性とイベントハンドラを追加 ★★★
             // border-r border-gray-300 -> border-r border-black に変更
-            html += `<div class="relative border-r border-black h-full ${colClass}">${eventsHtml}</div>`;
+            html += `<div data-date="${dayStr}" data-hour="${h}" class="time-slot relative border-r border-black h-full ${colClass}" 
+                ondragover="window.handleDragOver(event)" 
+                ondrop="window.handleDrop(event)" 
+                ondragleave="window.handleDragLeave(event)" 
+                ondragenter="window.handleDragEnter(event)">${eventsHtml}</div>`;
+            // ★★★ D&Dドロップターゲットの修正ここまで ★★★
         }
         html += `</div>`;
     }
@@ -1349,6 +1439,14 @@ function renderLogView() {
             // 黒ベースのアイテムを作成し、タグ色を左帯として利用
             const tagKey = e.tag || 'black';
             const accentClass = getTagAccentClass(tagKey);
+            
+            // ログの表示時間計算 (durationHoursは未定義のため、一旦削除または修正が必要)
+            // ここではdurationHoursの代わりにイベントの時間を表示する (簡略化のため)
+            const start = new Date(e.start);
+            const end = new Date(e.end);
+            const durationMs = end.getTime() - start.getTime();
+            const durationHours = (durationMs / (1000 * 60 * 60)).toFixed(1);
+
 
             html += `
                 <div class="relative mb-6">
@@ -1394,6 +1492,296 @@ window.changeDate = function(offset) {
     renderView(currentView);
 }
 
+
+// =======================================================
+// 7. ドラッグ＆ドロップ機能 (月/週ビュー) とタッチイベント処理
+// =======================================================
+
+let draggedEventData = null; // ドラッグ開始時に格納されるイベントデータ
+
+/**
+ * ドラッグ操作の開始 (ondragstart)
+ * @param {DragEvent} e 
+ */
+window.handleDragStart = function(e) {
+    const id = parseInt(e.target.getAttribute('data-event-id'));
+    // ★★★ 修正: ドラッグでの複製を無効化 (duplicate: falseに固定) ★★★
+    const isDuplicating = false; 
+
+    // dataTransferにイベントIDと複製フラグを格納
+    e.dataTransfer.effectAllowed = 'move'; // 移動のみ許可
+    e.dataTransfer.setData('application/json', JSON.stringify({
+        id: id,
+        duplicate: isDuplicating, // falseを渡す
+    }));
+    
+    // ドラッグ中の要素に視覚的なフィードバック (CSSの.draggingクラスで処理)
+    setTimeout(() => e.target.classList.add('dragging'), 0);
+}
+
+/**
+ * タッチ操作の開始 (ontouchstart)
+ * モバイルでのD&Dエミュレーションを開始
+ * @param {TouchEvent} e 
+ */
+window.handleTouchStart = function(e) {
+    e.stopPropagation(); // クリックイベントへの伝播を防ぐ
+    
+    // 複数のタッチを無視
+    if (e.touches.length > 1) return; 
+
+    const eventElement = e.currentTarget;
+    const id = parseInt(eventElement.getAttribute('data-event-id'));
+    const eventData = appData.schedules.find(ev => ev.id === id);
+    if (!eventData) return;
+
+    // タッチデータをグローバル変数に保存
+    draggedEventData = {
+        id: id,
+        duplicate: false, // ★★★ 修正: タッチでも複製はしない ★★★
+        element: eventElement,
+        initialX: e.touches[0].clientX,
+        initialY: e.touches[0].clientY,
+        currentX: e.touches[0].clientX,
+        currentY: e.touches[0].clientY,
+        isDragging: false,
+        dragClone: null,
+        // クリックとドラッグを区別するためのタイマーID
+        longPressTimer: setTimeout(() => {
+            if (draggedEventData) {
+                // ロングプレスが成立した場合、ドラッグを開始する
+                draggedEventData.isDragging = true;
+                eventElement.classList.add('dragging');
+    
+                // 視覚的なフィードバック用のクローンを作成
+                const clone = eventElement.cloneNode(true);
+                clone.classList.remove('dragging', 'event-draggable');
+                clone.style.position = 'fixed';
+                clone.style.width = eventElement.offsetWidth + 'px';
+                clone.style.height = eventElement.offsetHeight + 'px';
+                clone.style.pointerEvents = 'none'; // クローンが他の要素のイベントをブロックしないように
+                clone.style.opacity = '0.7';
+                clone.style.zIndex = '1000';
+                clone.style.transform = `translate(${e.touches[0].clientX - eventElement.offsetWidth / 2}px, ${e.touches[0].clientY - eventElement.offsetHeight / 2}px)`;
+                
+                document.body.appendChild(clone);
+                draggedEventData.dragClone = clone;
+            }
+        }, 300) // 300msのロングプレスでD&Dを開始
+    };
+}
+
+/**
+ * タッチ操作中の移動 (ontouchmove)
+ * @param {TouchEvent} e 
+ */
+window.handleTouchMove = function(e) {
+    if (!draggedEventData) return;
+    
+    draggedEventData.currentX = e.touches[0].clientX;
+    draggedEventData.currentY = e.touches[0].clientY;
+
+    if (!draggedEventData.isDragging) {
+        // ドラッグ開始前に大きく動いた場合、ロングプレスタイマーをクリアし、通常のクリックを許可
+        if (draggedEventData.longPressTimer && (
+            Math.abs(draggedEventData.currentX - draggedEventData.initialX) > 10 ||
+            Math.abs(draggedEventData.currentY - draggedEventData.initialY) > 10
+        )) {
+            clearTimeout(draggedEventData.longPressTimer);
+            draggedEventData.longPressTimer = null;
+        }
+        return;
+    }
+
+    e.preventDefault(); // スクロールを防ぐ (isDraggingがtrueの場合のみ)
+
+    const touch = e.touches[0];
+    const clone = draggedEventData.dragClone;
+    const eventElement = draggedEventData.element;
+
+    // クローン要素の位置を更新
+    clone.style.transform = `translate(${touch.clientX - eventElement.offsetWidth / 2}px, ${touch.clientY - eventElement.offsetHeight / 2}px)`;
+
+    // ドロップターゲットの検出とハイライト
+    const targetElement = document.elementFromPoint(touch.clientX, touch.clientY);
+    const targetSlot = targetElement ? targetElement.closest('.time-slot') : null;
+
+    // 既存のハイライトをリセット
+    document.querySelectorAll('.time-slot.drag-hover').forEach(el => el.classList.remove('drag-hover'));
+
+    if (targetSlot) {
+        // 新しいドロップターゲットをハイライト
+        targetSlot.classList.add('drag-hover');
+    }
+}
+
+
+/**
+ * タッチ操作の終了 (ontouchend)
+ * @param {TouchEvent} e 
+ */
+window.handleTouchEnd = function(e) {
+    if (!draggedEventData) return;
+
+    // ロングプレスタイマーが残っている場合、クリアする（ショートタップとみなす）
+    if (draggedEventData.longPressTimer) {
+        clearTimeout(draggedEventData.longPressTimer);
+        // 通常のクリックイベント (showEventDetails) はHTMLのonclickで処理される
+    }
+    
+    // ドラッグ中のクローンを削除
+    if (draggedEventData.dragClone) {
+        draggedEventData.dragClone.remove();
+    }
+    // ドラッグ元の要素の視覚的フィードバックをリセット
+    draggedEventData.element.classList.remove('dragging');
+    
+    if (draggedEventData.isDragging) {
+        // ドロップ処理
+        const touch = e.changedTouches[0];
+        const targetElement = document.elementFromPoint(touch.clientX, touch.clientY);
+        const targetSlot = targetElement ? targetElement.closest('.time-slot') : null;
+        
+        // 既存のハイライトをリセット
+        document.querySelectorAll('.time-slot.drag-hover').forEach(el => el.classList.remove('drag-hover'));
+
+        if (targetSlot) {
+            // タッチ操作でのドロップ処理を実行 (複製はfalseで固定)
+            const isMonthView = targetSlot.hasAttribute('data-date') && !targetSlot.hasAttribute('data-hour');
+            processDrop(draggedEventData.id, false, targetSlot, touch.clientX, touch.clientY, isMonthView);
+        }
+    }
+
+    draggedEventData = null; // リセット
+}
+
+/**
+ * ドラッグ操作が許可される場所に入る (ondragover)
+ * @param {DragEvent} e 
+ */
+window.handleDragOver = function(e) {
+    // ドロップを許可するために必要
+    e.preventDefault(); 
+    
+    // ★★★ 修正: ドラッグ複製がないため、常に'move'のみ許可 ★★★
+    e.dataTransfer.dropEffect = 'move';
+}
+
+/**
+ * ドラッグ操作がドロップターゲットに入ったとき (ondragenter)
+ * @param {DragEvent} e 
+ */
+window.handleDragEnter = function(e) {
+    // ドロップターゲット（時間/日付セル）にハイライトクラスを追加
+    e.currentTarget.classList.add('drag-hover');
+}
+
+/**
+ * ドラッグ操作がドロップターゲットから出たとき (ondragleave)
+ * @param {DragEvent} e 
+ */
+window.handleDragLeave = function(e) {
+    // ハイライトクラスを削除
+    // ondragleaveは子要素に移動したときにも発生するため、境界チェックを行う
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (e.clientX < rect.left || e.clientX >= rect.right || e.clientY < rect.top || e.clientY >= rect.bottom) {
+        e.currentTarget.classList.remove('drag-hover');
+    }
+}
+
+
+/**
+ * ドロップ操作の実行 (ondrop) - マウスイベント用
+ * @param {DragEvent} e 
+ * @param {boolean} [isMonthView] - 月ビューからのドロップかどうか (trueの場合、時間スナップは行わない)
+ */
+window.handleDrop = function(e, isMonthView = false) {
+    e.preventDefault();
+    
+    // ドロップターゲットのハイライト解除を最初に行う
+    e.currentTarget.classList.remove('drag-hover'); 
+
+    // dataTransferからデータを取得
+    let data;
+    try {
+        const dataString = e.dataTransfer.getData('application/json');
+        if (!dataString) throw new Error("No data in dataTransfer.");
+        data = JSON.parse(dataString);
+    } catch(error) {
+        console.error("D&Dデータ解析エラー:", error);
+        return;
+    }
+
+    // ★★★ 修正: ドラッグ複製がないため、duplicate: falseで固定 ★★★
+    processDrop(data.id, false, e.currentTarget, e.clientX, e.clientY, isMonthView);
+}
+
+/**
+ * ドロップ処理の中核ロジック (マウス/タッチ共通)
+ * @param {number} id - イベントID
+ * @param {boolean} duplicate - 複製フラグ (常にfalseとして扱う)
+ * @param {HTMLElement} targetSlot - ドロップされたターゲットセル
+ * @param {number} clientX - ドロップ時のX座標
+ * @param {number} clientY - ドロップ時のY座標
+ * @param {boolean} [isMonthView=false] - 月ビューからのドロップかどうか
+ */
+function processDrop(id, duplicate, targetSlot, clientX, clientY, isMonthView = false) {
+    
+    const originalEvent = appData.schedules.find(ev => ev.id === id);
+    if (!originalEvent) return;
+
+    // ドロップターゲットのセル情報を取得
+    const dayStr = targetSlot.getAttribute('data-date'); // YYYY-MM-DD
+    const baseDate = new Date(dayStr);
+    
+    const originalStart = new Date(originalEvent.start);
+    const originalEnd = new Date(originalEvent.end);
+    const durationMs = originalEnd.getTime() - originalStart.getTime();
+
+    let newStart;
+    let newEnd;
+
+    if (isMonthView) {
+        // 月ビューの場合: 日付のみを変更し、元の時刻を保持する
+        newStart = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate(), originalStart.getHours(), originalStart.getMinutes());
+        newEnd = new Date(newStart.getTime() + durationMs);
+    } else {
+        // 週ビューの場合: 日付と時間を変更する (既存の週ビューロジック)
+        const hour = parseInt(targetSlot.getAttribute('data-hour')); // H (8-22)
+        
+        // ドロップ位置の相対的な分を計算 (Y座標)
+        const rect = targetSlot.getBoundingClientRect();
+        const y = clientY - rect.top;
+        const minutes = Math.floor((y / rect.height) * 60);
+        // 5分単位に丸める
+        const snappedMinutes = Math.round(minutes / 5) * 5; 
+
+        // 新しい開始日時を計算
+        newStart = new Date(dayStr); 
+        newStart.setHours(hour, snappedMinutes);
+        newEnd = new Date(newStart.getTime() + durationMs);
+    }
+
+
+    // ★★★ 修正: 複製はボタン機能に移行したため、ここでは移動のみ実行 ★★★
+    
+    // 移動の場合: 既存のオブジェクトの日時を更新
+    originalEvent.start = newStart.toISOString();
+    originalEvent.end = newEnd.toISOString();
+    console.log("イベントを移動し、更新します。", originalEvent);
+    saveEvent(originalEvent); 
+}
+
+/**
+ * ドラッグ操作の終了 (ondragend) - マウスイベント用
+ * @param {DragEvent} e 
+ */
+window.handleDragEnd = function(e) {
+    // ドラッグ元の要素の視覚的フィードバックをリセット
+    e.target.classList.remove('dragging');
+}
+
+
 // =======================================================
 // 6. 初期化と実行
 // =======================================================
@@ -1423,6 +1811,19 @@ window.onload = async function() {
     window.showEventForm = showEventForm;
     window.showEventDetails = showEventDetails;
     window.showCustomMessageBox = showCustomMessageBox;
+    
+    // ★★★ D&D関連の関数をグローバルに公開 ★★★
+    window.handleDragStart = handleDragStart;
+    window.handleDragOver = handleDragOver;
+    window.handleDrop = handleDrop;
+    window.handleDragLeave = handleDragLeave;
+    window.handleDragEnter = handleDragEnter;
+    window.handleDragEnd = handleDragEnd;
+    
+    // ★★★ タッチイベント関連の関数をグローバルに公開 (モバイル対応) ★★★
+    window.handleTouchStart = handleTouchStart;
+    window.handleTouchMove = handleTouchMove;
+    window.handleTouchEnd = handleTouchEnd;
     
     // データロード (JSON Binから)
     await loadData(); 
