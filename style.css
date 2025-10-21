@@ -1,0 +1,140 @@
+/* グローバル設定とカスタムCSS */
+:root {
+    --color-white: #FEFEFE; /* ほぼ純粋な白 */
+    --color-black: #000000; /* 純粋な黒 */
+    --color-yellow: #FFC72C; /* ハイライト、警告（控えめに使用） */
+    --color-red: #D32F2F;   /* アクティブ、点滅、強調色 */
+    --shadow-ink: 6px 6px 0 var(--color-black); /* 手書き風の太い影 */
+    --shadow-ink-hover: 3px 3px 0 var(--color-black);
+}
+
+/* 1. アニメーション背景 (白黒フィルムノイズの強調) - 揺れは削除 */
+@keyframes noise {
+    /* 揺れアニメーション自体は残すが、body/app-containerには適用しない */
+    0%, 100% { transform: translate(0, 0); }
+    10% { transform: translate(-5%, 5%); }
+    20% { transform: translate(-10%, -5%); }
+    30% { transform: translate(5%, 10%); }
+    40% { transform: translate(-5%, 10%); }
+    50% { transform: translate(5%, -5%); }
+    60% { transform: translate(-10%, 5%); }
+    70% { transform: translate(10%, 0); }
+    80% { transform: translate(-5%, -10%); }
+    90% { transform: translate(0, 5%); }
+}
+
+body {
+    /* 手書き感のあるフォントに変更 */
+    font-family: 'Yusei Magic', cursive, sans-serif;
+    background-color: var(--color-white);
+    color: var(--color-black);
+    margin: 0;
+    padding-bottom: 72px; /* フッターの高さ */
+    /* フィルム粒子テクスチャの追加 (維持) */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='https://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.6' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100' height='100' filter='url(%23n)' opacity='0.08'/%3E%3C/svg%3E");
+}
+
+/* 太いインク線スタイル */
+.ink-border {
+    border: 4px solid var(--color-black);
+    border-radius: 8px; 
+}
+
+/* モバイルビューの最適化 */
+#app-container {
+    max-width: 600px;
+    min-height: 100vh;
+    margin: 0 auto;
+    background-color: var(--color-white);
+    /* 影を手書き風に調整 */
+    box-shadow: var(--shadow-ink); 
+    position: relative;
+}
+
+/* ビューコンテナ */
+.view-content {
+    padding: 16px; 
+    min-height: calc(100vh - 128px); 
+}
+
+/* ヘッダーとフッターの境界線を太くする */
+header, footer {
+    border-color: var(--color-black) !important;
+}
+
+/* ---------------------------------------------------- */
+/* 2. インタラクティブ要素 (ボタン、カード) のアニメーション */
+/* ---------------------------------------------------- */
+
+/* デジタルフォント風（フォールバック） */
+.retro-digital {
+    font-family: 'DSEG7 Classic', 'Courier New', monospace;
+    font-size: 2.5rem; 
+    letter-spacing: 2px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums; 
+}
+
+/* 点滅コロンアニメーション */
+@keyframes blink {
+    0%, 49% { color: var(--color-red); }
+    50%, 100% { color: var(--color-black); }
+}
+.blinking-colon {
+    animation: blink 1s step-end infinite;
+}
+
+/* コマ撮り風ボタン（steamboat-button）の影と動きを強化 */
+.steamboat-button {
+    transition: all 0.08s steps(3); /* ステップ数を増やし、カクカク感を強化 */
+    box-shadow: var(--shadow-ink);
+}
+.steamboat-button:hover:not(:disabled) {
+    transform: translate(-3px, -3px); /* 影がずれるような動き */
+    box-shadow: var(--shadow-ink-hover);
+}
+.steamboat-button:active {
+    transform: translate(3px, 3px); /* 押し込み時に影に埋まる */
+    box-shadow: 0 0 0 var(--color-black);
+}
+
+/* フッターナビゲーションボタン */
+footer button {
+    box-shadow: none !important; /* フッターボタンの影はオフ */
+    /* 非アクティブなボタンの色を黒（文字）と白（背景）に変更 */
+    color: var(--color-black) !important;
+}
+footer button.text-\[var\(--color-red\)\] {
+    background-color: var(--color-yellow); /* アクティブなボタンを黄色でハイライト */
+    color: var(--color-black) !important;
+}
+
+/* 新規作成ボタンを際立たせる */
+.fixed.right-6.bottom-20 {
+    box-shadow: var(--shadow-ink);
+    transition: transform 0.1s steps(2);
+}
+
+/* スロット分析のハイライト */
+.slot-highlight {
+    background-color: rgba(255, 199, 44, 0.4); 
+    position: absolute;
+    z-index: 10;
+}
+
+/* 天気アイコンのスタイル */
+.weather-icon {
+    font-size: 24px;
+    line-height: 1;
+}
+
+/* 入力フィールドのスタイル調整 (より手書きの枠線に) */
+input[type="text"], input[type="datetime-local"], textarea {
+    border-width: 4px;
+    outline: none;
+}
+/* フォーム要素のフォーカス時、赤線で強調 */
+input[type="text"]:focus, input[type="datetime-local"]:focus, textarea:focus {
+    border-color: var(--color-red);
+    box-shadow: 2px 2px 0 var(--color-red);
+}
