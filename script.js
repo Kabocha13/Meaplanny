@@ -10,6 +10,8 @@ const DEFAULT_LON = '139.9079';     // 新浦安駅付近の経度
 // ユーザー提供のAPIキーを設定
 const WEATHER_API_KEY = 'ffa3590bb2f3c1f712a6abbc1ebdccea';
 
+// 経路探索機能は削除されました。Navitime関連の定数は不要です。
+
 // APIエンドポイント
 const WEATHER_API_URL = 'https://api.openweathermap.org/data/2.5/forecast/daily';
 const GEO_API_URL = 'https://api.openweathermap.org/geo/1.0/direct';
@@ -507,7 +509,7 @@ async function showEventDetails(id) {
     // タグ情報の取得
     const tag = TAG_COLORS[event.tag] || TAG_COLORS['white'];
 
-    // タスクの場合はローディングをスキップし、すぐに詳細表示に移行
+    // ローディング表示
     openModal(`
         <h2 class="text-2xl font-extrabold ink-border-b pb-2 mb-4">${event.title}</h2>
         <div class="text-center py-8">
@@ -517,11 +519,10 @@ async function showEventDetails(id) {
     `);
 
     let weatherHtml = '';
-    let routeInfoHtml = '';
     let locationDetailHtml = '';
 
     if (!isTask) {
-        // 予定の場合のみ、天気予報と経路情報を取得・表示
+        // 予定の場合のみ、天気予報を取得・表示
         const locationForWeather = event.location;
         const weather = await fetchWeatherForecast(start, locationForWeather); 
         
@@ -553,33 +554,22 @@ async function showEventDetails(id) {
                 ※データは${weather.locationName}付近のものです。
             </div>
         `;
-
-        routeInfoHtml = `
-            <!-- 経路・時間検索 -->
-            <div class="mt-4">
-                <p class="font-bold mb-1 border-t pt-3">🚗 経路・所要時間情報:</p>
-                <p class="text-sm bg-white p-2 ink-border text-black italic">
-                    正確な所要時間を検索するAPI連携がないため、情報はありません。
-                    <span class="block text-xs text-black mt-1">目的地: ${event.location || '未定'}</span>
-                </p>
-            </div>
-        `;
     } else {
         // タスクの場合
         locationDetailHtml = '<p class="flex justify-between items-center"><span class="font-bold">📍 場所:</span> <span>場所なし (タスク)</span></p>';
     }
 
     // 外部情報連携コンテナは、タスクでない場合のみ表示
+    // 経路情報が削除されたため、天気情報のみを表示
     const externalInfoContainer = !isTask ? `
         <div class="ink-border p-3 mt-4 bg-white">
-            <h3 class="font-extrabold text-lg ink-border-b border-dashed pb-2 mb-3">天気・経路情報連携</h3>
+            <h3 class="font-extrabold text-lg ink-border-b border-dashed pb-2 mb-3">天気情報連携</h3>
             ${weatherHtml}
-            ${routeInfoHtml}
         </div>
     ` : '';
 
 
-    // ★★★ 完了ボタンのロジック修正 ★★★
+    // 完了ボタンのロジック
     let completionButtonHtml = '';
     if (isTask) {
         // タスクの場合: 完了/未完了のトグルボタンを表示
@@ -630,7 +620,6 @@ async function showEventDetails(id) {
             </div>
         </div>
     `;
-    // ★★★ 完了ボタンのロジック修正ここまで ★★★
 
     // 再度モーダルを開く (コンテンツの上書き)
     openModal(detailHtml);
@@ -660,7 +649,7 @@ function showCustomMessageBox(title, message, onConfirm, onCancel = closeModal) 
     `;
     openModal(messageBoxHtml);
 
-    // --- 修正箇所: イベントリスナー方式に変更し、onConfirm関数を確実に実行 ---
+    // イベントリスナー方式に変更し、onConfirm関数を確実に実行
     document.getElementById('messageBoxConfirmBtn').addEventListener('click', () => {
         closeModal();
         onConfirm(); // 渡されたコールバック関数 (deleteEvent) を実行
@@ -672,12 +661,11 @@ function showCustomMessageBox(title, message, onConfirm, onCancel = closeModal) 
             onCancel();
         }
     });
-    // --------------------------------------------------------------------------
 }
 
 
 // =======================================================
-// 3. 外部情報連携 (OpenWeatherMap API)
+// 3. 外部情報連携 (OpenWeatherMap) - 経路探索機能は削除
 // =======================================================
 
 /**
@@ -696,7 +684,14 @@ async function getCoordsFromLocation(locationName) {
     const geoApiUrl = `${GEO_API_URL}?q=${encodeURIComponent(locationName)}&limit=${limit}&appid=${WEATHER_API_KEY}`;
     
     try {
-        const response = await fetch(geoApiUrl);
+        let response = null;
+        for (let i = 0; i < 3; i++) {
+             response = await fetch(geoApiUrl);
+             if (response.ok) break; 
+             const delay = Math.pow(2, i) * 1000;
+             await new Promise(resolve => setTimeout(resolve, delay));
+        }
+
         if (!response.ok) throw new Error(`Geocoding API HTTP Error: ${response.status}`);
         
         const data = await response.json();
@@ -706,8 +701,8 @@ async function getCoordsFromLocation(locationName) {
             // 都市名、国名、都道府県名などを結合して表示名を作成
             const name = `${result.name}${result.state ? `, ${result.state}` : ''}${result.country ? ` (${result.country})` : ''}`;
             return { 
-                lat: result.lat.toFixed(4), 
-                lon: result.lon.toFixed(4), 
+                lat: result.lat.toFixed(6), // NAVITIMEに合わせて精度を上げる
+                lon: result.lon.toFixed(6), // NAVITIMEに合わせて精度を上げる
                 name: name,
                 status: 'success'
             };
@@ -901,6 +896,8 @@ function getPrecipitationDisplay(rainVolume) {
      if (rainVolume > 0.5) return '20 - 50% (弱雨)';
      return '20% 未満 (微量)';
 }
+
+// 経路探索機能（fetchRouteInfo）は削除されました。
 
 
 // =======================================================
@@ -1505,7 +1502,7 @@ let draggedEventData = null; // ドラッグ開始時に格納されるイベン
  */
 window.handleDragStart = function(e) {
     const id = parseInt(e.target.getAttribute('data-event-id'));
-    // ★★★ 修正: ドラッグでの複製を無効化 (duplicate: falseに固定) ★★★
+    // ドラッグでの複製を無効化 (duplicate: falseに固定)
     const isDuplicating = false; 
 
     // dataTransferにイベントIDと複製フラグを格納
@@ -1538,7 +1535,7 @@ window.handleTouchStart = function(e) {
     // タッチデータをグローバル変数に保存
     draggedEventData = {
         id: id,
-        duplicate: false, // ★★★ 修正: タッチでも複製はしない ★★★
+        duplicate: false, // タッチでも複製はしない
         element: eventElement,
         initialX: e.touches[0].clientX,
         initialY: e.touches[0].clientY,
@@ -1552,11 +1549,10 @@ window.handleTouchStart = function(e) {
                 // ロングプレスが成立した場合、ドラッグを開始する
                 draggedEventData.isDragging = true;
                 
-                // ★★★ 修正箇所: ドラッグ開始時に触覚フィードバックを追加 ★★★
+                // ドラッグ開始時に触覚フィードバックを追加
                 if ('vibrate' in navigator) {
                     navigator.vibrate(50); // 50ms振動させる
                 }
-                // ★★★ 修正ここまで ★★★
 
                 eventElement.classList.add('dragging');
     
@@ -1670,7 +1666,7 @@ window.handleDragOver = function(e) {
     // ドロップを許可するために必要
     e.preventDefault(); 
     
-    // ★★★ 修正: ドラッグ複製がないため、常に'move'のみ許可 ★★★
+    // ドラッグ複製がないため、常に'move'のみ許可
     e.dataTransfer.dropEffect = 'move';
 }
 
@@ -1719,7 +1715,7 @@ window.handleDrop = function(e, isMonthView = false) {
         return;
     }
 
-    // ★★★ 修正: ドラッグ複製がないため、duplicate: falseで固定 ★★★
+    // ドラッグ複製がないため、duplicate: falseで固定
     processDrop(data.id, false, e.currentTarget, e.clientX, e.clientY, isMonthView);
 }
 
@@ -1770,7 +1766,7 @@ function processDrop(id, duplicate, targetSlot, clientX, clientY, isMonthView = 
     }
 
 
-    // ★★★ 修正: 複製はボタン機能に移行したため、ここでは移動のみ実行 ★★★
+    // 複製はボタン機能に移行したため、ここでは移動のみ実行
     
     // 移動の場合: 既存のオブジェクトの日時を更新
     originalEvent.start = newStart.toISOString();
@@ -1804,7 +1800,7 @@ function initializeDemoData() {
         lastId: 0,
         currentDate: new Date() 
     };
-    console.log("データロードに失敗したため、スケジュールを空の状態で開始します。");
+    console.log("JSON Binからデータがロードされなかったため、スケジュールを空の状態で開始します。");
 }
 
 // アプリケーションの開始
@@ -1819,7 +1815,7 @@ window.onload = async function() {
     window.showEventDetails = showEventDetails;
     window.showCustomMessageBox = showCustomMessageBox;
     
-    // ★★★ D&D関連の関数をグローバルに公開 ★★★
+    // D&D関連の関数をグローバルに公開
     window.handleDragStart = handleDragStart;
     window.handleDragOver = handleDragOver;
     window.handleDrop = handleDrop;
@@ -1827,7 +1823,7 @@ window.onload = async function() {
     window.handleDragEnter = handleDragEnter;
     window.handleDragEnd = handleDragEnd;
     
-    // ★★★ タッチイベント関連の関数をグローバルに公開 (モバイル対応) ★★★
+    // タッチイベント関連の関数をグローバルに公開 (モバイル対応)
     window.handleTouchStart = handleTouchStart;
     window.handleTouchMove = handleTouchMove;
     window.handleTouchEnd = handleTouchEnd;
