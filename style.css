@@ -138,3 +138,78 @@ input[type="text"]:focus, input[type="datetime-local"]:focus, textarea:focus {
     border-color: var(--color-red);
     box-shadow: 2px 2px 0 var(--color-red);
 }
+
+/* ---------------------------------------------------- */
+/* カレンダービュー固有のスタイル調整 (複数日対応) */
+/* ---------------------------------------------------- */
+
+/* カレンダー全体のグリッドコンテナ */
+#calendar-grid {
+    position: relative; /* 予定バーを絶対配置するための基準 */
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+/* 各日付セル (ドロップターゲットと日付数字を含む) */
+.time-slot {
+    height: 80px; /* h-20を固定 */
+    overflow: hidden;
+    position: relative;
+    padding: 2px;
+    z-index: 1; /* 予定バーの下になるように */
+    user-select: none; /* セルの文字選択を無効化 */
+}
+
+/* D&Dのハイライトをバーの下に表示 */
+.time-slot.drag-hover {
+    background-color: rgba(255, 199, 44, 0.5) !important; 
+    z-index: 2;
+}
+
+/* 複数日予定バーが配置されるレイヤー */
+.event-bar-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none; /* 下のセルがクリックできるように */
+    z-index: 10;
+    /* グリッドをオーバーレイとして使用 */
+    display: grid; 
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    grid-auto-rows: 80px; /* 各行の高さ (h-20) */
+}
+
+/* 複数日予定バーの基本スタイル */
+.multi-day-event-bar {
+    position: relative; /* グリッドアイテム内での相対配置 */
+    height: 18px; /* 予定バーの高さ */
+    margin-top: 25px; /* 日付数字の下に配置 */
+    margin-bottom: 2px;
+    z-index: 30; 
+    cursor: pointer;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    transition: transform 0.1s steps(2);
+    box-shadow: 2px 2px 0 var(--color-black); /* 手書き風の影 */
+    pointer-events: auto; /* バー自身はクリック可能に */
+    border: 2px solid var(--color-black); /* ★修正: 3pxから2pxに太さを変更 */
+    border-radius: 4px;
+    padding: 0 4px;
+    font-size: 10px;
+    font-weight: bold;
+    line-height: 12px; /* 垂直方向の中央揃え */
+    align-self: start; /* グリッドセル内で上揃え */
+}
+
+.multi-day-event-bar:hover {
+    transform: translate(-1px, -1px);
+    box-shadow: 1px 1px 0 var(--color-black);
+}
+
+/* ドラッグ中の要素を非表示に（バーのゴースト要素はJSで処理） */
+.dragging {
+    opacity: 0 !important;
+}
