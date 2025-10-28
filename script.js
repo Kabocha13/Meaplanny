@@ -68,7 +68,8 @@ function getTagAccentClass(tagName) {
         case 'yellow':
             return 'border-[var(--color-yellow)]';
         case 'white':
-            return 'border-[var(--color-white)]'; // 白い帯（背景と区別しにくいが、意図通り）
+            // 白いボーダーは黒いセルの背景で目立たないため、ここでは白のボーダーと黒い文字に
+            return 'border-[var(--color-black)] text-black'; 
         case 'black':
         default:
             return 'border-[var(--color-black)]';
@@ -217,6 +218,42 @@ function formatDateTimeLocal(date) {
            String(date.getHours()).padStart(2, '0') + ':' +
            String(date.getMinutes()).padStart(2, '0');
 }
+
+
+// --- 複数日カレンダー表示のためのユーティリティ関数を追加 ---
+
+/**
+ * 指定された日付の属する週の最初の日（日曜日）を返す
+ * @param {Date} date
+ * @returns {Date}
+ */
+function getWeekStart(date) {
+    const day = date.getDay(); // 0 (Sunday) to 6 (Saturday)
+    const weekStart = new Date(date);
+    weekStart.setDate(date.getDate() - day);
+    // 時刻をクリアして日付のみを比較可能にする
+    return new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate());
+}
+
+/**
+ * 2つの日付間の日数を返す（d1とd2を含む期間の日数を返す）
+ * 例: 10/28(d1)から10/29(d2)なら 2日間
+ * @param {Date} d1
+ * @param {Date} d2
+ * @returns {number}
+ */
+function daysBetween(d1, d2) {
+    const ONE_DAY_MS = 1000 * 60 * 60 * 24;
+    // 時刻をクリア
+    const date1 = new Date(d1.getFullYear(), d1.getMonth(), d1.getDate());
+    const date2 = new Date(d2.getFullYear(), d2.getMonth(), d2.getDate());
+    const differenceMs = date2.getTime() - date1.getTime();
+    // 期間の日数を計算 (差分 + 1日)
+    return Math.floor(differenceMs / ONE_DAY_MS) + 1; 
+}
+
+// -----------------------------------------------------------
+
 
 // =======================================================
 // 1. データ操作 (CRUD)
@@ -477,7 +514,10 @@ function showEventForm(id = null, initialDate = appData.currentDate, prefillData
             title: formData.get('title'),
             type: type,
             start: new Date(formData.get('start')).toISOString(),
-            end: new Date(formData.get('end')).toISOString(),
+            // 終了日時が開始日時より前の場合、開始日時と同じにする
+            end: (new Date(formData.get('end')).getTime() < new Date(formData.get('start')).getTime()) 
+                 ? new Date(formData.get('start')).toISOString() 
+                 : new Date(formData.get('end')).toISOString(),
             location: location, // タスクの場合は空、予定の場合は入力値
             notes: formData.get('notes'),
             tag: formData.get('tag') || 'white', // ★★★ 追加: タグを保存
@@ -503,8 +543,16 @@ async function showEventDetails(id) {
     const now = new Date();
     const isPast = end.getTime() < now.getTime(); // 予定が既に終了しているか
     
-    const dateStr = `${start.getMonth() + 1}月${start.getDate()}日`;
-    const timeStr = `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')} - ${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
+    // 複数日かどうかの判定 (開始日と終了日が異なるか)
+    const isMultiDay = start.toDateString() !== end.toDateString();
+
+    const dateStr = isMultiDay 
+        ? `${start.getMonth() + 1}月${start.getDate()}日 - ${end.getMonth() + 1}月${end.getDate()}日`
+        : `${start.getMonth() + 1}月${start.getDate()}日`;
+
+    const timeStr = isMultiDay 
+        ? `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')} (開始) - ${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')} (終了)`
+        : `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')} - ${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
     
     // タグ情報の取得
     const tag = TAG_COLORS[event.tag] || TAG_COLORS['white'];
@@ -1050,7 +1098,7 @@ function renderView(view) {
 }
 
 /**
- * 月ビューのレンダリング
+ * 月ビューのレンダリング (複数日バー対応)
  */
 function renderMonthView(headerHtml) {
     const date = appData.currentDate;
@@ -1063,98 +1111,204 @@ function renderMonthView(headerHtml) {
     const startDayOfWeek = firstDayOfMonth.getDay(); // 0=日曜
 
     // ヘッダーと日付タイトル
+    // 修正: まずヘッダーを挿入
     viewContainer.innerHTML = `
         <div class="p-2">
             ${headerHtml(`${year}年${month + 1}月`)}
         </div>
+        <div id="month-calendar-container" class="ink-border p-1 bg-white">
+            <!-- 曜日ヘッダー -->
+            <div class="grid grid-cols-7 text-center font-bold text-sm bg-[var(--color-yellow)] text-black ink-border-b">
+                ${['日', '月', '火', '水', '木', '金', '土'].map(day => `<div class="p-2">${day}</div>`).join('')}
+            </div>
+
+            <!-- カレンダーグリッド本体 -->
+            <div id="calendar-grid">
+                <!-- 日付セルはJSで追加 -->
+            </div>
+        </div>
     `;
     
-    // bg-gray-200 -> bg-white に変更
-    let html = '<div class="ink-border p-1 bg-white">';
-    html += '<div class="grid grid-cols-7 text-center font-bold text-sm bg-[var(--color-yellow)] text-black ink-border-b">';
-    ['日', '月', '火', '水', '木', '金', '土'].forEach(day => {
-        html += `<div class="p-2">${day}</div>`;
-    });
-    html += '</div>';
+    // DOMに追加された要素を取得
+    const calendarGrid = document.getElementById('calendar-grid');
+    if (!calendarGrid) return; // 取得失敗の場合はここで終了
 
-    html += '<div class="grid grid-cols-7">';
+    // ------------------------------------------------------------
+    // 1. カレンダーのフレームを作成 (日付セル)
+    // ------------------------------------------------------------
+    
+    let datesHtml = '';
+    
+    // 予定バーを配置するコンテナを calendar-grid の直下に作成
+    datesHtml += '<div id="event-bar-layer" class="event-bar-layer"></div>'; // 予定バーのコンテナ
 
-    // 前月の日付埋め
-    // bg-gray-50 -> bg-white に変更
-    for (let i = 0; i < startDayOfWeek; i++) {
-        // D&Dのドロップターゲットとして機能させるために、空のセルにもクラスを追加
-        const dayStr = formatDate(new Date(year, month, 1 - (startDayOfWeek - i)));
-        html += `<div data-date="${dayStr}" class="time-slot h-20 border border-black bg-white" ondragover="window.handleDragOver(event)" ondrop="window.handleDrop(event, true)" ondragleave="window.handleDragLeave(event)" ondragenter="window.handleDragEnter(event)"></div>`;
-    }
+    // グリッドに表示する最初の日付
+    let currentDay = new Date(year, month, 1 - startDayOfWeek);
+    const allDates = [];
 
-    // 今月の日付
-    for (let day = 1; day <= lastDayOfMonth.getDate(); day++) {
-        const currentDate = new Date(year, month, day);
-        const dayStr = formatDate(currentDate);
+    // 日付セルを生成し、全期間の日付配列を作成
+    for (let i = 0; i < 42; i++) { // 最大6週間 (42セル)
+        const dayStr = formatDate(currentDay);
         const isToday = dayStr === formatDate(today);
+        const isThisMonth = currentDay.getMonth() === month;
 
-        // その日の予定を取得 (完了済みタスクを除外)
-        const events = appData.schedules.filter(e => 
-            formatDate(new Date(e.start)) === dayStr && 
-            !(e.type === 'task' && e.completed) // 完了済みタスクを除外
-        );
+        // 月ビューでは、日付をクリックするとその日の新規予定フォームが開く
+        const clickHandler = `window.showEventForm(null, new Date(${currentDay.getFullYear()}, ${currentDay.getMonth()}, ${currentDay.getDate()}))`;
         
-        // ★★★ 変更: 黒ベース＋タグ色の帯を適用、D&D属性とタッチイベントハンドラを追加 ★★★
-        const eventHtml = events.slice(0, 2).map(e => {
-            const tagKey = e.tag || 'black';
-            const accentClass = getTagAccentClass(tagKey);
-            // 完了済みタスクは少し暗く表示
-            const baseClass = e.completed ? 'opacity-60 line-through' : '';
-
-            return `
-                <div onclick="event.stopPropagation(); window.showEventDetails(${e.id})"
-                     draggable="true" 
-                     data-event-id="${e.id}"
-                     ondragstart="window.handleDragStart(event)"
-                     ondragend="window.handleDragEnd(event)"
-                     ontouchstart="window.handleTouchStart(event)"
-                     ontouchmove="window.handleTouchMove(event)"
-                     ontouchend="window.handleTouchEnd(event)"
-                     class="event-draggable text-xs truncate px-1 mt-0.5 rounded-sm cursor-pointer bg-black text-white border-l-4 ${accentClass} ${baseClass}"
-                     title="${e.title} (${TAG_COLORS[tagKey].label})">
-                    ${e.title}
-                </div>
-            `;
-        }).join('');
-        // ★★★ 変更ここまで ★★★
-
         const dayClass = isToday ? 'bg-[var(--color-red)] text-white font-extrabold' : 'bg-white text-black';
-        
-        // 日付セルをドロップターゲットとして設定
-        html += `
+        const otherMonthClass = isThisMonth ? '' : 'opacity-40'; // 他の月の日付は薄く表示
+
+        // time-slotはD&Dターゲット
+        datesHtml += `
             <div data-date="${dayStr}" 
-                 class="time-slot h-20 border border-black p-0.5 relative cursor-pointer" 
-                 onclick="window.showEventForm(null, new Date(${year}, ${month}, ${day}))"
+                 class="time-slot border border-black relative cursor-pointer ${otherMonthClass}" 
+                 onclick="${clickHandler}"
                  ondragover="window.handleDragOver(event)" 
                  ondrop="window.handleDrop(event, true)" 
                  ondragleave="window.handleDragLeave(event)" 
                  ondragenter="window.handleDragEnter(event)">
                 <div class="w-6 h-6 rounded-full text-center text-xs flex items-center justify-center ${dayClass}">
-                    ${day}
-                </div>
-                <div class="mt-0.5 space-y-0.5">
-                    ${eventHtml}
+                    ${currentDay.getDate()}
                 </div>
             </div>
         `;
+
+        allDates.push(new Date(currentDay));
+        currentDay.setDate(currentDay.getDate() + 1);
+        
+        // 42セルに満たない場合はここで終了
+        if (i >= 34 && currentDay.getMonth() !== month) break;
     }
 
-    // 翌月の日付埋め
-    const totalCells = startDayOfWeek + lastDayOfMonth.getDate();
-    const remainingCells = 42 - totalCells; // 6週間表示（最大42セル）を想定
-    for (let i = 0; i < remainingCells; i++) {
-         const dayStr = formatDate(new Date(year, month + 1, i + 1));
-         html += `<div data-date="${dayStr}" class="time-slot h-20 border border-black bg-white" ondragover="window.handleDragOver(event)" ondrop="window.handleDrop(event, true)" ondragleave="window.handleDragLeave(event)" ondragenter="window.handleDragEnter(event)"></div>`;
+    // 日付セルをグリッドに挿入
+    calendarGrid.innerHTML = datesHtml;
+    
+    // ------------------------------------------------------------
+    // 2. 予定バーをオーバーレイとして描画
+    // ------------------------------------------------------------
+    // 修正: DOM挿入後に eventBarLayer を取得
+    const eventBarLayer = document.getElementById('event-bar-layer');
+    if (!eventBarLayer) return;
+
+    // 表示対象の予定 (完了済みタスクを除く)
+    const displayEvents = appData.schedules.filter(e => 
+        (e.type === 'schedule' || (e.type === 'task' && !e.completed))
+    ).map(e => ({
+        ...e,
+        start: new Date(e.start),
+        end: new Date(e.end)
+    }));
+
+    // 週ごとに予定を処理
+    let datesInGrid = allDates;
+    
+    // 週の開始日ごとにループ (週の開始は常にdatesInGrid[0], [7], [14]...)
+    for (let weekStartIdx = 0; weekStartIdx < datesInGrid.length; weekStartIdx += 7) {
+        const weekDates = datesInGrid.slice(weekStartIdx, weekStartIdx + 7);
+        if (weekDates.length === 0) continue;
+
+        // この週に表示する必要がある予定を決定
+        const eventsForWeek = displayEvents
+            .filter(e => 
+                // 予定がこの週に開始または継続しているか
+                // 予定の開始日が週の最終日以前 **AND** 予定の終了日（日付のみ）が週の開始日以降
+                e.start.getTime() <= weekDates[6].getTime() && 
+                new Date(e.end.getFullYear(), e.end.getMonth(), e.end.getDate()).getTime() >= weekDates[0].getTime()
+            )
+            .sort((a, b) => a.start.getTime() - b.start.getTime()); // 開始日順にソート
+
+        // 週の予定を、最大3つのトラック（バーの行）に割り当てる
+        // 値は、そのトラックがいつまで占有されているかを示す日付のミリ秒
+        const tracks = [0, 0, 0]; 
+
+        eventsForWeek.forEach(event => {
+            // イベントの表示開始日 (この週の日曜日またはイベント開始日)
+            const eventDisplayStart = (event.start.getTime() >= weekDates[0].getTime()) 
+                ? event.start 
+                : weekDates[0];
+            
+            // イベントの表示終了日 (この週の土曜日またはイベント終了日)
+            // 終了日は日付のみを考慮し、週の終わり(土曜日)を越えないようにする
+            const weekEndDay = new Date(weekDates[6].getFullYear(), weekDates[6].getMonth(), weekDates[6].getDate());
+            const eventEndDay = new Date(event.end.getFullYear(), event.end.getMonth(), event.end.getDate());
+
+            const eventDisplayEnd = (eventEndDay.getTime() <= weekEndDay.getTime())
+                ? eventEndDay
+                : weekEndDay;
+
+            // --- グリッド列の計算 ---
+            // eventDisplayStart が weekDates[0] から数えて何日目か (0=日曜, 6=土曜)
+            let startCol = daysBetween(weekDates[0], eventDisplayStart) - 1; 
+            
+            // 期間の日数計算 (表示開始日から表示終了日を含む期間)
+            let durationDays = daysBetween(eventDisplayStart, eventDisplayEnd); 
+            
+            // 期間が7日を超えることはないが、念のため週内に収める
+            durationDays = Math.min(durationDays, 7 - startCol); 
+            
+            if (durationDays <= 0) return; // 0日以下の表示はしない
+
+
+            // --- トラック（行）の割り当て ---
+            let assignedTrack = -1;
+            // 占有終了日（日付のみ）
+            const eventEndDayMs = new Date(eventDisplayEnd.getFullYear(), eventDisplayEnd.getMonth(), eventDisplayEnd.getDate()).getTime();
+
+            // 空いているトラックを探す
+            for (let t = 0; t < tracks.length; t++) {
+                // tracks[t] は占有終了日のミリ秒。
+                // 現在のイベント開始日が、占有終了日の**翌日**以降であれば空き
+                const trackEndDayMs = tracks[t] === 0 ? 0 : tracks[t] + ONE_DAY_MS;
+                
+                // イベント表示開始日が、トラックの占有終了日（の翌日）以降であれば空き
+                if (tracks[t] === 0 || eventDisplayStart.getTime() >= trackEndDayMs) {
+                    assignedTrack = t;
+                    // このトラックの占有を、イベントの表示終了日まで延長
+                    tracks[t] = eventEndDayMs; 
+                    break;
+                }
+            }
+
+            // トラックが見つからない場合は、この週は表示をスキップ (セルが溢れるのを防ぐ)
+            if (assignedTrack === -1) return; 
+
+            // スタイル計算
+            const tagKey = event.tag || 'black';
+            // 白タグは背景が白なので、文字も黒にすることで視認性を高める
+            const tagClass = TAG_COLORS[tagKey].class.includes('bg-white') ? 'bg-white text-black' : TAG_COLORS[tagKey].class;
+            const eventTitle = event.title;
+            const gridStartCol = startCol + 1; // CSS Gridは1から始まる
+            
+            // グリッド行の開始位置 (1から始まる)
+            // datesInGrid の最初の要素から数えて何週目か (0-5) + 1
+            const gridRowStart = (weekStartIdx / 7) + 1;
+            
+            // バーの位置調整 (トラックに応じて y 軸の位置を変更)
+            // 1行目のバーは 25px, 2行目のバーは 45px, 3行目のバーは 65px
+            const marginTop = 25 + (assignedTrack * 20); 
+
+            const barHtml = `
+                <div class="multi-day-event-bar ${tagClass} ${event.completed ? 'opacity-50 line-through' : ''}"
+                    style="
+                        grid-row: ${gridRowStart};
+                        grid-column: ${gridStartCol} / span ${durationDays};
+                        margin-top: ${marginTop}px;
+                    "
+                    onclick="window.showEventDetails(${event.id})"
+                    draggable="true" 
+                    data-event-id="${event.id}"
+                    ondragstart="window.handleDragStart(event)"
+                    ondragend="window.handleDragEnd(event)"
+                    ontouchstart="window.handleTouchStart(event)"
+                    ontouchmove="window.handleTouchMove(event)"
+                    ontouchend="window.handleTouchEnd(event)"
+                    title="${eventTitle}">
+                    ${eventTitle}
+                </div>
+            `;
+            eventBarLayer.insertAdjacentHTML('beforeend', barHtml);
+        });
     }
-
-
-    html += '</div></div>';
-    viewContainer.innerHTML += html;
 }
 
 /**
@@ -1199,6 +1353,8 @@ function renderWeekView(headerHtml) {
     html += '<div class="relative">';
     const hourStart = 8;
     const hourEnd = 23;
+    const ONE_DAY_MS = 1000 * 60 * 60 * 24; // ユーティリティ関数として定義済みだが、ローカルでも使用
+
     for (let h = hourStart; h < hourEnd; h++) {
         // border-b border-gray-200 -> border-b border-black に変更
         html += `<div class="grid grid-cols-8 h-12 border-b border-black">`;
@@ -1228,10 +1384,6 @@ function renderWeekView(headerHtml) {
             let eventsHtml = '';
             events.forEach(e => {
                 // 1時間内の予定の開始・終了位置を計算
-                const startMin = e.start.getMinutes();
-                const endMin = e.end.getMinutes();
-                let top = (startMin / 60) * 100;
-                let height = ((e.end.getTime() - e.start.getTime()) / (60 * 60 * 1000)) * 100;
 
                 // 複数の日にまたがるイベントの調整 (ここでは1時間スロットに収めるため簡略化)
                 const startOnThisHour = Math.max(startOfDay.getTime(), e.start.getTime());
@@ -1239,20 +1391,30 @@ function renderWeekView(headerHtml) {
 
                 if (endOnThisHour > startOnThisHour) {
                     const duration = endOnThisHour - startOnThisHour;
-                    top = ((startOnThisHour - startOfDay.getTime()) / (60 * 60 * 1000)) * 100;
-                    height = (duration / (60 * 60 * 1000)) * 100;
-
+                    const hourHeight = 48; // h-12 (48px)
+                    
+                    // 開始位置 (スロットの上端からの相対的な割合)
+                    let top = ((startOnThisHour - startOfDay.getTime()) / (60 * 60 * 1000));
+                    // 高さ (スロットの高さに対する割合)
+                    let height = (duration / (60 * 60 * 1000));
+                    
                     // 100%を超えないように調整
-                    if (top + height > 100) height = 100 - top;
+                    if (top + height > 1) height = 1 - top;
                     if (top < 0) {
                         height += top;
                         top = 0;
                     }
+                    
+                    // ピクセル単位に変換
+                    const topPosition = top * hourHeight;
+                    const heightPosition = height * hourHeight;
+
 
                     // ★★★ D&D機能のため、draggable属性とタッチイベントハンドラを追加 ★★★
                     const tagKey = e.tag || 'black';
                     const accentClass = getTagAccentClass(tagKey);
-                    const baseClass = e.completed ? 'opacity-60 line-through' : '';
+                    // 週ビューでは、バーの色をタグ色に合わせる（月ビューと視覚的に区別するため）
+                    const baseClass = e.completed ? 'opacity-60 line-through' : 'bg-black text-white'; 
 
                     eventsHtml += `
                         <div onclick="event.stopPropagation(); window.showEventDetails(${e.id})"
@@ -1263,8 +1425,8 @@ function renderWeekView(headerHtml) {
                             ontouchstart="window.handleTouchStart(event)"
                             ontouchmove="window.handleTouchMove(event)"
                             ontouchend="window.handleTouchEnd(event)"
-                            class="event-draggable absolute w-full px-1 text-xs truncate rounded-sm cursor-pointer z-20 bg-black text-white border-l-4 ${accentClass} ${baseClass}"
-                            style="top: ${top}%; height: ${height}%; left: 0px; box-sizing: border-box;"
+                            class="event-draggable absolute w-full px-1 text-xs truncate rounded-sm cursor-pointer z-20 ${baseClass} border-l-4 ${accentClass}"
+                            style="top: ${topPosition}px; height: ${heightPosition}px; left: 0px; box-sizing: border-box;"
                             title="${e.title} (${TAG_COLORS[tagKey].label})">
                             ${e.title}
                         </div>
@@ -1303,7 +1465,7 @@ function renderWeekView(headerHtml) {
 
             // 9:00を基準とした相対位置を計算 (h=8が開始時間)
             const totalMinutesFromStart = ((start.getHours() - hourStart) * 60) + start.getMinutes();
-            const durationMinutes = (end.getTime() - start.getTime()) / (60 * 60 * 1000);
+            const durationMinutes = (end.getTime() - start.getTime()) / (60 * 1000);
 
             if (totalMinutesFromStart >= 0 && durationMinutes > 0) {
                 const topPosition = (totalMinutesFromStart / 60) * hourHeight;
@@ -1495,6 +1657,7 @@ window.changeDate = function(offset) {
 // =======================================================
 
 let draggedEventData = null; // ドラッグ開始時に格納されるイベントデータ
+const ONE_DAY_MS = 1000 * 60 * 60 * 24; // ユーティリティ関数として定義済み
 
 /**
  * ドラッグ操作の開始 (ondragstart)
@@ -1509,7 +1672,7 @@ window.handleDragStart = function(e) {
     e.dataTransfer.effectAllowed = 'move'; // 移動のみ許可
     e.dataTransfer.setData('application/json', JSON.stringify({
         id: id,
-        duplicate: isDuplicating, // falseを渡す
+        duplicate: isDuDuplicating, // falseを渡す
     }));
     
     // ドラッグ中の要素に視覚的なフィードバック (CSSの.draggingクラスで処理)
@@ -1607,6 +1770,7 @@ window.handleTouchMove = function(e) {
 
     // ドロップターゲットの検出とハイライト
     const targetElement = document.elementFromPoint(touch.clientX, touch.clientY);
+    // .time-slotはカレンダーの日付セル。月ビューと週ビューの両方に対応
     const targetSlot = targetElement ? targetElement.closest('.time-slot') : null;
 
     // 既存のハイライトをリセット
