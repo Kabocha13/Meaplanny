@@ -26,6 +26,8 @@ if (!BIN_ID || !X_MASTER_KEY) {
 }
 
 const JSONBIN_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
+// localStorageでキャッシュを保存するためのキー
+const CACHE_KEY = 'meaplanny_data_cache';
 
 let appData = {
     schedules: [],
@@ -83,16 +85,59 @@ const modalOverlay = document.getElementById('modal-overlay');
 const modalContent = document.getElementById('modal-content');
 
 /**
- * データをJSON Binからロード
- * @returns {Promise<void>}
+ * データをlocalStorageから同期的にロード (高速な初期表示用)
+ * @returns {boolean} キャッシュからロードできたかどうか
  */
-async function loadData() {
+function loadCache() {
+    try {
+        const cachedData = localStorage.getItem(CACHE_KEY);
+        if (cachedData) {
+            const storedData = JSON.parse(cachedData);
+            if (storedData && storedData.schedules && Array.isArray(storedData.schedules)) {
+                appData = { ...appData, ...storedData };
+                if (appData.currentDate) {
+                    appData.currentDate = new Date(appData.currentDate);
+                }
+                console.log("✅ キャッシュからデータがロードされました。");
+                return true;
+            }
+        }
+    } catch (e) {
+        console.error("キャッシュロードエラー:", e);
+    }
+    return false;
+}
+
+/**
+ * データをlocalStorageに保存
+ */
+function saveCache() {
+    try {
+        const dataToCache = {
+            schedules: appData.schedules,
+            lastId: appData.lastId,
+            currentView: appData.currentView,
+            // DateオブジェクトをISO文字列に変換して保存
+            currentDate: appData.currentDate.toISOString() 
+        };
+        localStorage.setItem(CACHE_KEY, JSON.stringify(dataToCache));
+        console.log("✅ データがキャッシュに保存されました。");
+    } catch (e) {
+        console.error("キャッシュ保存エラー:", e);
+    }
+}
+
+
+/**
+ * データをJSON Binからロード
+ * @returns {Promise<boolean>} JSON Binからデータを正常にロードできたかどうか
+ */
+async function loadDataFromRemote() {
     if (!BIN_ID || !X_MASTER_KEY) {
-        initializeDemoData();
-        return;
+        return false;
     }
 
-    console.log("データをJSON Binからロード中...");
+    console.log("☁️ データをJSON Binからリモートロード中...");
     try {
         let response = null;
         for (let i = 0; i < 3; i++) {
@@ -112,9 +157,8 @@ async function loadData() {
         
         if (!response.ok) {
             if (response.status === 404) {
-                console.log("JSON Binにデータが見つかりませんでした。初回起動またはBinが空です。");
-                initializeDemoData();
-                return;
+                console.log("JSON Binにデータが見つかりませんでした。");
+                return false;
             }
             throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -122,18 +166,36 @@ async function loadData() {
         const storedData = await response.json();
 
         if (storedData && storedData.schedules && Array.isArray(storedData.schedules)) {
-            appData = { ...appData, ...storedData };
-            if (appData.currentDate) {
-                appData.currentDate = new Date(appData.currentDate);
+            // リモートデータがローカルと異なる場合にのみ更新
+            const remoteDataString = JSON.stringify(storedData.schedules);
+            const localDataString = JSON.stringify(appData.schedules);
+
+            if (remoteDataString !== localDataString) {
+                // データを更新
+                appData = { ...appData, ...storedData };
+                if (appData.currentDate) {
+                    appData.currentDate = new Date(appData.currentDate);
+                }
+                console.log("🚀 JSON Binから最新データがロードされ、更新されました。");
+                
+                // キャッシュも更新
+                saveCache(); 
+                
+                // ビューを再描画して最新データを反映
+                renderView(appData.currentView);
+
+            } else {
+                console.log("✅ JSON Binのデータは最新です。更新は不要です。");
             }
-            console.log("JSON Binからデータが正常にロードされました。");
+            
+            return true;
         } else {
-            console.error("JSON Binからのデータフォーマットが不正です。空のデータを設定します。");
-            initializeDemoData();
+            console.error("JSON Binからのデータフォーマットが不正です。");
+            return false;
         }
     } catch (e) {
-        console.error("JSON Binからのデータロードに失敗しました。空のデータで続行します。", e);
-        initializeDemoData();
+        console.error("JSON Binからのデータロードに失敗しました。", e);
+        return false;
     }
 }
 
@@ -144,10 +206,14 @@ async function loadData() {
 async function saveData() {
     if (!BIN_ID || !X_MASTER_KEY) {
         console.log("キーが未設定のため、データ保存はスキップされました。");
+        saveCache(); // キャッシュへの保存は試みる
         return;
     }
 
-    console.log("データをJSON Binに保存中...");
+    // まずキャッシュを更新
+    saveCache();
+
+    console.log("💾 データをJSON Binに保存中...");
     try {
         const dataToSave = {
             ...appData,
@@ -175,7 +241,7 @@ async function saveData() {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
 
-        console.log("JSON Binへのデータ保存が成功しました。");
+        console.log("🎉 JSON Binへのデータ保存が成功しました。");
 
     } catch (e) {
         console.error("JSON Binへのデータ保存に失敗しました。", e);
@@ -289,11 +355,10 @@ function deleteEvent(id) {
     // 確認モーダルの代わりにカスタムメッセージボックスを使用
     showCustomMessageBox('確認', 'この予定を削除しますか？', () => {
         appData.schedules = appData.schedules.filter(e => e.id !== id);
-        // --- 修正箇所: データのフィルタリング後に保存と再レンダリングを呼び出す ---
+        // データのフィルタリング後に保存と再レンダリングを呼び出す
         saveData(); 
         closeModal();
         renderView(appData.currentView);
-        // ----------------------------------------------------------------------
     });
 }
 
@@ -1539,7 +1604,7 @@ function renderTaskView() {
 
         html += `
             <div class="ink-border p-3 mb-2 flex justify-between items-center bg-[var(--color-yellow)]/50 line-through text-black cursor-pointer steamboat-button relative overflow-hidden" onclick="window.showEventDetails(${task.id})">
-                <!-- タグ色を左の太線で強調 (border-l-4を直接使用) -->
+                <!-- タグ色を左の太線で強調 -->
                 <div class="absolute top-0 left-0 h-full w-2 ${accentClass} border-l-4"></div>
                 <div class="flex-1 ml-3">
                     <p class="font-bold">${task.title}</p>
@@ -1672,7 +1737,7 @@ window.handleDragStart = function(e) {
     e.dataTransfer.effectAllowed = 'move'; // 移動のみ許可
     e.dataTransfer.setData('application/json', JSON.stringify({
         id: id,
-        duplicate: isDuDuplicating, // falseを渡す
+        duplicate: isDuplicating, // falseを渡す
     }));
     
     // ドラッグ中の要素に視覚的なフィードバック (CSSの.draggingクラスで処理)
@@ -1992,13 +2057,27 @@ window.onload = async function() {
     window.handleTouchMove = handleTouchMove;
     window.handleTouchEnd = handleTouchEnd;
     
-    // データロード (JSON Binから)
-    await loadData(); 
+    // ------------------------------------------------
+    // ★修正: データロードのロジックを変更 (キャッシュ優先)
+    // ------------------------------------------------
 
+    // 1. キャッシュから同期的にデータをロードし、即座にレンダリング
+    const loadedFromCache = loadCache();
+    if (!loadedFromCache) {
+        // キャッシュがない場合、空のデータで初期化
+        initializeDemoData();
+    }
+    
     // 現在時刻の更新ループ
     updateCurrentTime();
     setInterval(updateCurrentTime, 1000);
 
-    // 初期ビューのレンダリング
+    // 初期ビューのレンダリング (キャッシュデータがあれば表示)
     renderView(appData.currentView);
+    
+    // 2. JSON Binから非同期で最新データをロードし、キャッシュを更新
+    // これにより、サイトはすぐに表示され、バックグラウンドで最新データが取得される
+    await loadDataFromRemote(); 
+
+    // ------------------------------------------------
 };
