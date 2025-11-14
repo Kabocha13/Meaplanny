@@ -4,17 +4,20 @@
 
 // OpenWeatherMap API仕様に基づいて更新
 const defaultLocation = '新浦安駅'; // デフォルトの場所を新浦安駅に変更
-const DEFAULT_LAT = '35.6517';      // 新浦安駅付近の緯度
-const DEFAULT_LON = '139.9079';     // 新浦安駅付近の経度
+const DEFAULT_LAT = '35.64952603';      // 新浦安駅付近の緯度
+const DEFAULT_LON = '139.91246031';     // 新浦安駅付近の経度
 
 // ユーザー提供のAPIキーを設定
 const WEATHER_API_KEY = 'ffa3590bb2f3c1f712a6abbc1ebdccea';
 
-// 経路探索機能は削除されました。Navitime関連の定数は不要です。
-
 // APIエンドポイント
 const WEATHER_API_URL = 'https://api.openweathermap.org/data/2.5/forecast/daily';
 const GEO_API_URL = 'https://api.openweathermap.org/geo/1.0/direct';
+
+
+// --- NAVITIME Route Total Navi API (経路探索) 設定 ---
+// 経路探索機能の削除に伴い、関連する定数を削除しました。
+// ----------------------------------------------------
 
 
 // JSON Bin 設定
@@ -26,8 +29,7 @@ if (!BIN_ID || !X_MASTER_KEY) {
 }
 
 const JSONBIN_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
-// localStorageでキャッシュを保存するためのキー
-const CACHE_KEY = 'meaplanny_data_cache';
+// ★削除: localStorageでキャッシュを保存するためのキー (CACHE_KEY) は不要になりました。
 
 let appData = {
     schedules: [],
@@ -85,46 +87,41 @@ const modalOverlay = document.getElementById('modal-overlay');
 const modalContent = document.getElementById('modal-content');
 
 /**
- * データをlocalStorageから同期的にロード (高速な初期表示用)
- * @returns {boolean} キャッシュからロードできたかどうか
+ * ユーティリティ: スケジュール内の日付文字列をDateオブジェクトに変換し、無効な日付を修正
+ * @param {Array<Object>} schedules - スケジュール配列
  */
-function loadCache() {
-    try {
-        const cachedData = localStorage.getItem(CACHE_KEY);
-        if (cachedData) {
-            const storedData = JSON.parse(cachedData);
-            if (storedData && storedData.schedules && Array.isArray(storedData.schedules)) {
-                appData = { ...appData, ...storedData };
-                if (appData.currentDate) {
-                    appData.currentDate = new Date(appData.currentDate);
-                }
-                console.log("✅ キャッシュからデータがロードされました。");
-                return true;
+function sanitizeDates(schedules) {
+    schedules.forEach(e => {
+        // startの日付オブジェクトを作成
+        let startDate = new Date(e.start);
+        // DateがInvalid Date (無効な日付) の場合、文字列をnullに設定し、後続の処理でエラーにならないようにする
+        if (isNaN(startDate.getTime())) {
+            console.warn(`無効な開始日時を検出しました: ID ${e.id}`);
+            e.start = null; // 無効な日付をnull文字列として保存
+        } else {
+            // 有効な場合はISO文字列に再変換（一貫性を保つため）
+            e.start = startDate.toISOString();
+        }
+
+        // endの日付オブジェクトを作成
+        let endDate = new Date(e.end);
+        if (isNaN(endDate.getTime())) {
+            console.warn(`無効な終了日時を検出しました: ID ${e.id}`);
+            e.end = null; // 無効な日付をnull文字列として保存
+        } else {
+            e.end = endDate.toISOString();
+        }
+
+        // actualEndもチェック
+        if (e.actualEnd) {
+            let actualEndDate = new Date(e.actualEnd);
+             if (isNaN(actualEndDate.getTime())) {
+                e.actualEnd = null;
+            } else {
+                e.actualEnd = actualEndDate.toISOString();
             }
         }
-    } catch (e) {
-        console.error("キャッシュロードエラー:", e);
-    }
-    return false;
-}
-
-/**
- * データをlocalStorageに保存
- */
-function saveCache() {
-    try {
-        const dataToCache = {
-            schedules: appData.schedules,
-            lastId: appData.lastId,
-            currentView: appData.currentView,
-            // DateオブジェクトをISO文字列に変換して保存
-            currentDate: appData.currentDate.toISOString() 
-        };
-        localStorage.setItem(CACHE_KEY, JSON.stringify(dataToCache));
-        console.log("✅ データがキャッシュに保存されました。");
-    } catch (e) {
-        console.error("キャッシュ保存エラー:", e);
-    }
+    });
 }
 
 
@@ -134,6 +131,8 @@ function saveCache() {
  */
 async function loadDataFromRemote() {
     if (!BIN_ID || !X_MASTER_KEY) {
+        // キーがない場合は空のデータで初期化し、falseを返す
+        initializeDemoData();
         return false;
     }
 
@@ -166,34 +165,29 @@ async function loadDataFromRemote() {
         const storedData = await response.json();
 
         if (storedData && storedData.schedules && Array.isArray(storedData.schedules)) {
-            // リモートデータがローカルと異なる場合にのみ更新
-            const remoteDataString = JSON.stringify(storedData.schedules);
-            const localDataString = JSON.stringify(appData.schedules);
-
-            if (remoteDataString !== localDataString) {
-                // データを更新
-                appData = { ...appData, ...storedData };
-                if (appData.currentDate) {
-                    appData.currentDate = new Date(appData.currentDate);
-                }
-                console.log("🚀 JSON Binから最新データがロードされ、更新されました。");
-                
-                // キャッシュも更新
-                saveCache(); 
-                
-                // ビューを再描画して最新データを反映
-                renderView(appData.currentView);
-
-            } else {
-                console.log("✅ JSON Binのデータは最新です。更新は不要です。");
-            }
+            // リモートデータをサニタイズ
+            sanitizeDates(storedData.schedules);
             
+            // ★修正: ローカルとの比較を削除し、常にリモートデータを適用
+            appData = { ...appData, ...storedData };
+            
+            // currentDataの有効性チェック
+            if (appData.currentDate) {
+                const loadedDate = new Date(appData.currentDate);
+                appData.currentDate = isNaN(loadedDate.getTime()) ? new Date() : loadedDate;
+            } else {
+                appData.currentDate = new Date();
+            }
+
+            console.log("🚀 JSON Binから最新データがロードされました。");
             return true;
+            
         } else {
             console.error("JSON Binからのデータフォーマットが不正です。");
             return false;
         }
     } catch (e) {
+        // 通信失敗またはJSONパースエラーが発生した場合
         console.error("JSON Binからのデータロードに失敗しました。", e);
         return false;
     }
@@ -206,17 +200,16 @@ async function loadDataFromRemote() {
 async function saveData() {
     if (!BIN_ID || !X_MASTER_KEY) {
         console.log("キーが未設定のため、データ保存はスキップされました。");
-        saveCache(); // キャッシュへの保存は試みる
         return;
     }
 
-    // まずキャッシュを更新
-    saveCache();
+    // ★修正: キャッシュへの保存処理を削除
 
     console.log("💾 データをJSON Binに保存中...");
     try {
         const dataToSave = {
             ...appData,
+            // 保存時、日付は既にISO文字列として格納されているためそのまま
             currentDate: appData.currentDate.toISOString()
         };
 
@@ -309,6 +302,12 @@ function getWeekStart(date) {
  * @returns {number}
  */
 function daysBetween(d1, d2) {
+    // 有効なDateオブジェクトかチェック
+    if (!d1 || isNaN(d1.getTime()) || !d2 || isNaN(d2.getTime())) {
+        console.error("daysBetween: 無効な日付が渡されました。");
+        return 0;
+    }
+    
     const ONE_DAY_MS = 1000 * 60 * 60 * 24;
     // 時刻をクリア
     const date1 = new Date(d1.getFullYear(), d1.getMonth(), d1.getDate());
@@ -330,18 +329,23 @@ function daysBetween(d1, d2) {
  * @param {Object} eventData - イベントデータ
  */
 function saveEvent(eventData) {
-    if (eventData.id) {
+    // 既存のイベントがあるか確認し、無効な日付をnullにしてから処理を継続
+    const existingIndex = appData.schedules.findIndex(e => e.id === eventData.id);
+    if (existingIndex !== -1) {
         // 更新
-        const index = appData.schedules.findIndex(e => e.id === eventData.id);
-        if (index !== -1) {
-            appData.schedules[index] = eventData;
-        }
+        appData.schedules[existingIndex] = eventData;
     } else {
         // 新規登録
         appData.lastId++;
         eventData.id = appData.lastId;
         appData.schedules.push(eventData);
     }
+    
+    // 保存前に念のため全体をサニタイズ（特にeventDataのstart/endが有効なISO文字列であることを確認）
+    // saveEventの直前でstart/endはISO文字列に変換されているため、このステップは主に保険
+    // 無効なISO文字列が入っている場合はここでnullになる
+    sanitizeDates(appData.schedules); 
+    
     saveData(); 
     closeModal();
     renderView(appData.currentView);
@@ -399,8 +403,8 @@ window.duplicateEvent = function(id) {
         title: originalEvent.title,
         type: originalEvent.type,
         // 日時は元の予定と同じものを設定し、編集画面で変更してもらう
-        start: originalStart.toISOString(),
-        end: originalEvent.end,
+        start: originalEvent.start, // ISO文字列のまま渡す
+        end: originalEvent.end,     // ISO文字列のまま渡す
         location: originalEvent.location,
         notes: originalEvent.notes,
         tag: originalEvent.tag,
@@ -468,8 +472,14 @@ function showEventForm(id = null, initialDate = appData.currentDate, prefillData
     const defaultEnd = new Date(defaultStart.getTime() + 60 * 60 * 1000);
 
     // 開始/終了日時の決定: 複製/編集データから取得、または新規デフォルト
-    const startTime = data ? new Date(data.start) : defaultStart;
-    const endTime = data ? new Date(data.end) : defaultEnd;
+    // data.start/data.endがnullの場合、新規デフォルト値を使用する
+    const startTime = (data && data.start) ? new Date(data.start) : defaultStart;
+    const endTime = (data && data.end) ? new Date(data.end) : defaultEnd;
+    
+    // Dateオブジェクトが無効な場合は、新規デフォルト値にフォールバック
+    const finalStartTime = isNaN(startTime.getTime()) ? defaultStart : startTime;
+    const finalEndTime = isNaN(endTime.getTime()) ? defaultEnd : endTime;
+
 
     const formHtml = `
         <h2 class="text-xl font-extrabold ink-border-b pb-2 mb-4">${id ? '予定を編集' : (prefillData ? '予定を複製・編集' : '新しい予定/タスク')}</h2>
@@ -497,12 +507,12 @@ function showEventForm(id = null, initialDate = appData.currentDate, prefillData
             <div id="datetime-fields">
                 <div class="mb-4">
                     <label for="start" class="block mb-1 font-bold">開始日時</label>
-                    <input type="datetime-local" id="start" name="start" value="${formatDateTimeLocal(startTime)}"
+                    <input type="datetime-local" id="start" name="start" value="${formatDateTimeLocal(finalStartTime)}"
                            class="ink-border p-2 w-full" required>
                 </div>
                 <div class="mb-4">
                     <label for="end" class="block mb-1 font-bold">終了日時</label>
-                    <input type="datetime-local" id="end" name="end" value="${formatDateTimeLocal(endTime)}"
+                    <input type="datetime-local" id="end" name="end" value="${formatDateTimeLocal(finalEndTime)}"
                            class="ink-border p-2 w-full" required>
                 </div>
             </div>
@@ -574,15 +584,20 @@ function showEventForm(id = null, initialDate = appData.currentDate, prefillData
         // タスクの場合、場所を空にする
         const location = type === 'task' ? '' : formData.get('location');
         
+        // フォームから取得した日時文字列をDateオブジェクトに変換
+        const formStart = new Date(formData.get('start'));
+        const formEnd = new Date(formData.get('end'));
+        
+        // 終了日時が開始日時より前の場合、開始日時と同じにする
+        const finalEnd = (formEnd.getTime() < formStart.getTime()) ? formStart : formEnd;
+
         const data = {
             id: formData.get('id') ? parseInt(formData.get('id')) : null,
             title: formData.get('title'),
             type: type,
-            start: new Date(formData.get('start')).toISOString(),
-            // 終了日時が開始日時より前の場合、開始日時と同じにする
-            end: (new Date(formData.get('end')).getTime() < new Date(formData.get('start')).getTime()) 
-                 ? new Date(formData.get('start')).toISOString() 
-                 : new Date(formData.get('end')).toISOString(),
+            // ISO文字列に変換して保存
+            start: formStart.toISOString(),
+            end: finalEnd.toISOString(),
             location: location, // タスクの場合は空、予定の場合は入力値
             notes: formData.get('notes'),
             tag: formData.get('tag') || 'white', // ★★★ 追加: タグを保存
@@ -600,7 +615,11 @@ function showEventForm(id = null, initialDate = appData.currentDate, prefillData
  */
 async function showEventDetails(id) {
     const event = appData.schedules.find(e => e.id === id);
-    if (!event) return;
+    if (!event || !event.start || !event.end) {
+        // startまたはendが無効な場合は詳細表示をスキップ
+        showCustomMessageBox('エラー', 'この予定データは破損しています。削除または編集して修正してください。', () => {});
+        return;
+    }
 
     const isTask = event.type === 'task';
     const start = new Date(event.start);
@@ -627,19 +646,20 @@ async function showEventDetails(id) {
         <h2 class="text-2xl font-extrabold ink-border-b pb-2 mb-4">${event.title}</h2>
         <div class="text-center py-8">
             <p class="font-bold">情報をロード中...</p>
-            <p class="text-sm italic text-black">（外部連携処理）</p>
+            <p class="text-sm italic text-black">（外部連携処理: 天気）</p>
         </div>
     `);
 
     let weatherHtml = '';
     let locationDetailHtml = '';
-
-    if (!isTask) {
-        // 予定の場合のみ、天気予報を取得・表示
+    
+    if (!isTask && event.location && event.location.trim() !== '') {
+        
+        // 1. 天気予報の取得
         const locationForWeather = event.location;
         const weather = await fetchWeatherForecast(start, locationForWeather); 
         
-        locationDetailHtml = `<p class="flex justify-between items-center"><span class="font-bold">📍 場所:</span> <span>${event.location || '未定'}</span></p>`;
+        locationDetailHtml = `<p class="flex justify-between items-center"><span class="font-bold">📍 場所:</span> <span>${event.location}</span></p>`;
 
         weatherHtml = `
             <!-- 天気情報 -->
@@ -667,16 +687,22 @@ async function showEventDetails(id) {
                 ※データは${weather.locationName}付近のものです。
             </div>
         `;
+        
     } else {
-        // タスクの場合
-        locationDetailHtml = '<p class="flex justify-between items-center"><span class="font-bold">📍 場所:</span> <span>場所なし (タスク)</span></p>';
+        // タスクまたは場所未設定の場合
+        locationDetailHtml = `<p class="flex justify-between items-center"><span class="font-bold">📍 場所:</span> <span>${isTask ? '場所なし (タスク)' : '場所が未設定'}</span></p>`;
     }
 
-    // 外部情報連携コンテナは、タスクでない場合のみ表示
-    // 経路情報が削除されたため、天気情報のみを表示
-    const externalInfoContainer = !isTask ? `
+
+    // 外部情報連携コンテナ (天気情報のみ)
+    const externalInfoContainer = (!isTask && event.location && event.location.trim() !== '') ? `
         <div class="ink-border p-3 mt-4 bg-white">
-            <h3 class="font-extrabold text-lg ink-border-b border-dashed pb-2 mb-3">天気情報連携</h3>
+            <h3 class="font-extrabold text-lg ink-border-b border-dashed pb-2 mb-3">外部情報連携</h3>
+            
+            <!-- 天気情報セクション -->
+            <h4 class="font-bold text-base mb-2 flex items-center">
+                <span class="text-2xl mr-2">☀️</span>目的地周辺の天気
+            </h4>
             ${weatherHtml}
         </div>
     ` : '';
@@ -714,7 +740,7 @@ async function showEventDetails(id) {
             ${event.notes ? `<p class="font-bold border-t pt-3">📝 備考:</p><p class="whitespace-pre-wrap">${event.notes}</p>` : ''}
         </div>
 
-        <!-- 外部情報連携 (タスクの場合は空) -->
+        <!-- 外部情報連携 (タスク/場所未設定の場合は空) -->
         ${externalInfoContainer}
 
         <div class="flex justify-between items-center mt-6 flex-wrap gap-2">
@@ -778,7 +804,7 @@ function showCustomMessageBox(title, message, onConfirm, onCancel = closeModal) 
 
 
 // =======================================================
-// 3. 外部情報連携 (OpenWeatherMap) - 経路探索機能は削除
+// 3. 外部情報連携 (OpenWeatherMap) - 経路探索機能は削除されました
 // =======================================================
 
 /**
@@ -814,8 +840,9 @@ async function getCoordsFromLocation(locationName) {
             // 都市名、国名、都道府県名などを結合して表示名を作成
             const name = `${result.name}${result.state ? `, ${result.state}` : ''}${result.country ? ` (${result.country})` : ''}`;
             return { 
-                lat: result.lat.toFixed(6), // NAVITIMEに合わせて精度を上げる
-                lon: result.lon.toFixed(6), // NAVITIMEに合わせて精度を上げる
+                // 緯度経度を文字列として返す
+                lat: result.lat.toFixed(6), 
+                lon: result.lon.toFixed(6), 
                 name: name,
                 status: 'success'
             };
@@ -837,7 +864,8 @@ async function getCoordsFromLocation(locationName) {
  */
 async function fetchWeatherForecast(date, location) {
     const now = new Date();
-    const isPast = date.getTime() < now.getTime();
+    // ★修正4: Dateオブジェクトが有効かチェック
+    const isPast = (date && !isNaN(date.getTime())) ? date.getTime() < now.getTime() : false;
     
     // 1. 場所から緯度・経度を取得
     const coords = await getCoordsFromLocation(location);
@@ -1010,8 +1038,7 @@ function getPrecipitationDisplay(rainVolume) {
      return '20% 未満 (微量)';
 }
 
-// 経路探索機能（fetchRouteInfo）は削除されました。
-
+// 経路探索機能の削除に伴い、fetchRouteInfo と generateRouteHtml 関数を削除しました。
 
 // =======================================================
 // 4. 高度な時間管理機能 (スロット分析)
@@ -1035,6 +1062,9 @@ function analyzeTimeSlots(targetDate) {
         // 完了済みのタスクを除外する条件を追加
         .filter(e => e.type === 'schedule' || (e.type === 'task' && !e.completed))
         .filter(e => {
+            // ★修正5: startプロパティの有効性をチェック
+            if (!e.start) return false;
+
             const start = new Date(e.start);
             // 比較を簡単にするために、日付部分のみを比較
             const eventDayStr = formatDate(start);
@@ -1042,9 +1072,12 @@ function analyzeTimeSlots(targetDate) {
             return eventDayStr === targetDayStr;
         })
         .map(e => ({
+            // ★修正6: start/endが無効な場合はマップしない
             start: new Date(e.start),
             end: new Date(e.end)
         }))
+        // Invalid Dateを除外
+        .filter(e => !isNaN(e.start.getTime()) && !isNaN(e.end.getTime()))
         .sort((a, b) => a.start.getTime() - b.start.getTime());
 
     let currentCheckTime = dayStart;
@@ -1255,9 +1288,9 @@ function renderMonthView(headerHtml) {
     const eventBarLayer = document.getElementById('event-bar-layer');
     if (!eventBarLayer) return;
 
-    // 表示対象の予定 (完了済みタスクを除く)
+    // 表示対象の予定 (完了済みタスク、無効な日付を持つ予定を除く)
     const displayEvents = appData.schedules.filter(e => 
-        (e.type === 'schedule' || (e.type === 'task' && !e.completed))
+        (e.type === 'schedule' || (e.type === 'task' && !e.completed)) && e.start && e.end
     ).map(e => ({
         ...e,
         start: new Date(e.start),
@@ -1275,16 +1308,17 @@ function renderMonthView(headerHtml) {
         // この週に表示する必要がある予定を決定
         const eventsForWeek = displayEvents
             .filter(e => 
-                // 予定がこの週に開始または継続しているか
-                // 予定の開始日が週の最終日以前 **AND** 予定の終了日（日付のみ）が週の開始日以降
+                // e.startとe.endは既に有効なDateオブジェクトとしてマップされている
+                // 予定の開始日が週の最終日（weekDates[6]）以前 **AND** 予定の終了日（日付のみ）が週の開始日（weekDates[0]）以降
                 e.start.getTime() <= weekDates[6].getTime() && 
-                new Date(e.end.getFullYear(), e.end.getMonth(), e.end.getDate()).getTime() >= weekDates[0].getTime()
+                new Date(e.end.getFullYear(), e.end.getMonth(), e.end.getDate()).getTime() >= new Date(weekDates[0].getFullYear(), weekDates[0].getMonth(), weekDates[0].getDate()).getTime()
             )
             .sort((a, b) => a.start.getTime() - b.start.getTime()); // 開始日順にソート
 
         // 週の予定を、最大3つのトラック（バーの行）に割り当てる
-        // 値は、そのトラックがいつまで占有されているかを示す日付のミリ秒
+        // 値は、そのトラックが次に利用可能になる日の、午前0時のミリ秒
         const tracks = [0, 0, 0]; 
+        const ONE_DAY_MS_LOCAL = 1000 * 60 * 60 * 24; // 1日のミリ秒
 
         eventsForWeek.forEach(event => {
             // イベントの表示開始日 (この週の日曜日またはイベント開始日)
@@ -1297,15 +1331,18 @@ function renderMonthView(headerHtml) {
             const weekEndDay = new Date(weekDates[6].getFullYear(), weekDates[6].getMonth(), weekDates[6].getDate());
             const eventEndDay = new Date(event.end.getFullYear(), event.end.getMonth(), event.end.getDate());
 
-            const eventDisplayEnd = (eventEndDay.getTime() <= weekEndDay.getTime())
-                ? eventEndDay
-                : weekEndDay;
+            // ★修正: イベント終了日(eventEndDay)と週の最終日(weekEndDay)を比較し、
+            // イベント終了日が週の最終日より**後**かどうかで、表示終了日を決定する
+            const eventDisplayEnd = (eventEndDay.getTime() > weekEndDay.getTime())
+                ? weekEndDay // イベントが週をまたぐ場合は、この週の土曜日に打ち切る
+                : eventEndDay; // イベントが週の途中で終わる場合は、その日付を使用
 
             // --- グリッド列の計算 ---
             // eventDisplayStart が weekDates[0] から数えて何日目か (0=日曜, 6=土曜)
             let startCol = daysBetween(weekDates[0], eventDisplayStart) - 1; 
             
             // 期間の日数計算 (表示開始日から表示終了日を含む期間)
+            // eventDisplayStartとeventDisplayEndはどちらも日付オブジェクトである
             let durationDays = daysBetween(eventDisplayStart, eventDisplayEnd); 
             
             // 期間が7日を超えることはないが、念のため週内に収める
@@ -1316,20 +1353,18 @@ function renderMonthView(headerHtml) {
 
             // --- トラック（行）の割り当て ---
             let assignedTrack = -1;
-            // 占有終了日（日付のみ）
-            const eventEndDayMs = new Date(eventDisplayEnd.getFullYear(), eventDisplayEnd.getMonth(), eventDisplayEnd.getDate()).getTime();
+            // 占有が終了する日の「翌日」の午前0時のミリ秒を計算
+            // eventDisplayEnd (日付のみ) の翌日 00:00:00 がトラックの解放時間となる
+            const trackReleaseTimeMs = eventDisplayEnd.getTime() + ONE_DAY_MS_LOCAL;
 
             // 空いているトラックを探す
             for (let t = 0; t < tracks.length; t++) {
-                // tracks[t] は占有終了日のミリ秒。
-                // 現在のイベント開始日が、占有終了日の**翌日**以降であれば空き
-                const trackEndDayMs = tracks[t] === 0 ? 0 : tracks[t] + ONE_DAY_MS;
-                
-                // イベント表示開始日が、トラックの占有終了日（の翌日）以降であれば空き
-                if (tracks[t] === 0 || eventDisplayStart.getTime() >= trackEndDayMs) {
+                // tracks[t] は、そのトラックが次に利用可能になる日のミリ秒
+                // 現在のイベント表示開始日(時刻付き)が、トラックの解放時間以降であれば空き
+                if (tracks[t] === 0 || eventDisplayStart.getTime() >= tracks[t]) {
                     assignedTrack = t;
-                    // このトラックの占有を、イベントの表示終了日まで延長
-                    tracks[t] = eventEndDayMs; 
+                    // このトラックの占有を、イベントの表示終了日の翌日まで延長
+                    tracks[t] = trackReleaseTimeMs; 
                     break;
                 }
             }
@@ -1339,13 +1374,17 @@ function renderMonthView(headerHtml) {
 
             // スタイル計算
             const tagKey = event.tag || 'black';
-            // 白タグは背景が白なので、文字も黒にすることで視認性を高める
-            const tagClass = TAG_COLORS[tagKey].class.includes('bg-white') ? 'bg-white text-black' : TAG_COLORS[tagKey].class;
+            
+            // 月ビューの予定バーには、border-2 border-black を条件付きで適用する。
+            // CSSの.multi-day-event-barには`border: 2px solid var(--color-black);`があるため、
+            // 白タグ以外はそのボーダーを打ち消す border-none が必要。
+            const tagClass = TAG_COLORS[tagKey].class + (tagKey !== 'white' ? ' border-none' : '');
+
+
             const eventTitle = event.title;
             const gridStartCol = startCol + 1; // CSS Gridは1から始まる
             
             // グリッド行の開始位置 (1から始まる)
-            // datesInGrid の最初の要素から数えて何週目か (0-5) + 1
             const gridRowStart = (weekStartIdx / 7) + 1;
             
             // バーの位置調整 (トラックに応じて y 軸の位置を変更)
@@ -1418,7 +1457,7 @@ function renderWeekView(headerHtml) {
     html += '<div class="relative">';
     const hourStart = 8;
     const hourEnd = 23;
-    const ONE_DAY_MS = 1000 * 60 * 60 * 24; // ユーティリティ関数として定義済みだが、ローカルでも使用
+    // const ONE_DAY_MS = 1000 * 60 * 60 * 24; // ユーティリティ関数として定義済みだが、ローカルでも使用
 
     for (let h = hourStart; h < hourEnd; h++) {
         // border-b border-gray-200 -> border-b border-black に変更
@@ -1433,11 +1472,12 @@ function renderWeekView(headerHtml) {
             // bg-yellow-50/50 -> bg-[var(--color-yellow)] の半透明 (ここでは直接の色指定がないため、半透明の黄色を維持)
             const colClass = isToday ? 'bg-[var(--color-yellow)] opacity-50' : '';
 
-            // その日その時間の予定を取得 (完了済みタスクを除外)
+            // その日その時間の予定を取得 (完了済みタスク、無効な日付を持つ予定を除く)
             const startOfDay = new Date(d.getFullYear(), d.getMonth(), d.getDate(), h, 0);
             const endOfHour = new Date(d.getFullYear(), d.getMonth(), d.getDate(), h, 59, 59);
 
             const events = appData.schedules
+                .filter(e => e.start && e.end) // ★修正7: startとendが無効な場合はフィルタリング
                 .filter(e => new Date(e.start) < endOfHour && new Date(e.end) > startOfDay)
                 .filter(e => !(e.type === 'task' && e.completed)) // 完了済みタスクを除外
                 .map(e => ({
@@ -1527,10 +1567,14 @@ function renderWeekView(headerHtml) {
         slots.forEach(slot => {
             const start = slot.start;
             const end = slot.end;
+            
+            // ★修正8: start/endが有効かチェック
+            if (!start || isNaN(start.getTime()) || !end || isNaN(end.getTime())) return;
+
 
             // 9:00を基準とした相対位置を計算 (h=8が開始時間)
             const totalMinutesFromStart = ((start.getHours() - hourStart) * 60) + start.getMinutes();
-            const durationMinutes = (end.getTime() - start.getTime()) / (60 * 1000);
+            const durationMinutes = (end.getTime() - start.getTime()) / (60 * 60 * 1000);
 
             if (totalMinutesFromStart >= 0 && durationMinutes > 0) {
                 const topPosition = (totalMinutesFromStart / 60) * hourHeight;
@@ -1555,8 +1599,22 @@ function renderWeekView(headerHtml) {
  */
 function renderTaskView() {
     const tasks = appData.schedules.filter(e => e.type === 'task');
-    const pendingTasks = tasks.filter(t => !t.completed).sort((a, b) => new Date(a.end) - new Date(b.end));
-    const completedTasks = tasks.filter(t => t.completed).sort((a, b) => new Date(b.actualEnd) - new Date(a.actualEnd));
+    const pendingTasks = tasks.filter(t => !t.completed).sort((a, b) => {
+        // ★修正9: 日付が無効な場合はソート順を調整
+        const dateA = new Date(a.end);
+        const dateB = new Date(b.end);
+        const timeA = isNaN(dateA.getTime()) ? Infinity : dateA.getTime();
+        const timeB = isNaN(dateB.getTime()) ? Infinity : dateB.getTime();
+        return timeA - timeB;
+    });
+    const completedTasks = tasks.filter(t => t.completed).sort((a, b) => {
+        // ★修正10: actualEndが無効な場合はソート順を調整
+        const dateA = new Date(a.actualEnd);
+        const dateB = new Date(b.actualEnd);
+        const timeA = isNaN(dateA.getTime()) ? 0 : dateA.getTime();
+        const timeB = isNaN(dateB.getTime()) ? 0 : dateB.getTime();
+        return timeB - timeA;
+    });
 
     let html = '<h2 class="text-xl font-extrabold ink-border-b pb-2 mb-4">タスク管理 (Todoリスト)</h2>';
 
@@ -1567,8 +1625,13 @@ function renderTaskView() {
         html += '<p class="text-black italic">素晴らしい！未完了タスクはありません。</p>';
     } else {
         pendingTasks.forEach(task => {
-            const endDate = new Date(task.end);
-            const deadline = `${endDate.getMonth() + 1}/${endDate.getDate()} ${String(endDate.getHours()).padStart(2, '0')}:${String(endDate.getMinutes()).padStart(2, '0')}`;
+            let deadline = '締切なし';
+            // ★修正11: endが無効な場合は日付表示をスキップ
+            if (task.end && !isNaN(new Date(task.end).getTime())) {
+                const endDate = new Date(task.end);
+                deadline = `締切: ${endDate.getMonth() + 1}/${endDate.getDate()} ${String(endDate.getHours()).padStart(2, '0')}:${String(endDate.getMinutes()).padStart(2, '0')}`;
+            }
+
             // タグクラスを取得
             const tagKey = task.tag || 'white';
             const accentClass = getTagAccentClass(tagKey);
@@ -1580,7 +1643,7 @@ function renderTaskView() {
                     <div class="absolute top-0 left-0 h-full w-2 ${accentClass} border-l-4"></div>
                     <div class="flex-1 ml-3">
                         <p class="font-bold">${task.title}</p>
-                        <p class="text-black text-xs">締切: ${deadline} ${getTagHtml(task.tag)}</p>
+                        <p class="text-black text-xs">${deadline} ${getTagHtml(task.tag)}</p>
                     </div>
                     <button onclick="event.stopPropagation(); window.toggleTask(${task.id})" class="steamboat-button bg-[var(--color-red)] text-white px-3 py-1 ink-border ml-3">
                         完了
@@ -1596,8 +1659,13 @@ function renderTaskView() {
     html += '<h3 class="text-lg font-bold text-[var(--color-yellow)] mb-2">🟡 完了済み (最近5件)</h3>';
     // text-gray-500 -> text-black, bg-gray-100 -> bg-[var(--color-yellow)]/50, bg-gray-300 -> bg-black/20 に変更
     completedTasks.slice(0, 5).forEach(task => {
-        const actualEnd = new Date(task.actualEnd);
-        const completedTime = `${actualEnd.getMonth() + 1}/${actualEnd.getDate()} ${String(actualEnd.getHours()).padStart(2, '0')}:${String(actualEnd.getMinutes()).padStart(2, '0')}`;
+        let completedTime = '時間不明';
+         // ★修正12: actualEndが無効な場合は日付表示をスキップ
+        if (task.actualEnd && !isNaN(new Date(task.actualEnd).getTime())) {
+            const actualEnd = new Date(task.actualEnd);
+            completedTime = `完了: ${actualEnd.getMonth() + 1}/${actualEnd.getDate()} ${String(actualEnd.getHours()).padStart(2, '0')}:${String(actualEnd.getMinutes()).padStart(2, '0')}`;
+        }
+        
         // タグクラスを取得
         const tagKey = task.tag || 'white';
         const accentClass = getTagAccentClass(tagKey);
@@ -1608,7 +1676,7 @@ function renderTaskView() {
                 <div class="absolute top-0 left-0 h-full w-2 ${accentClass} border-l-4"></div>
                 <div class="flex-1 ml-3">
                     <p class="font-bold">${task.title}</p>
-                    <p class="text-xs">完了: ${completedTime} ${getTagHtml(task.tag)}</p>
+                    <p class="text-xs">${completedTime} ${getTagHtml(task.tag)}</p>
                 </div>
                 <button onclick="event.stopPropagation(); window.toggleTask(${task.id})" class="steamboat-button bg-black/20 text-black px-3 py-1 ink-border ml-3 text-xs">
                     戻す
@@ -1627,11 +1695,15 @@ function renderTaskView() {
 function renderLogView() {
     // 完了した予定とタスクを結合し、実測時間（actualEnd）または終了時間（end）でソート
     const completedEvents = appData.schedules
-        .filter(e => e.type === 'schedule' || (e.type === 'task' && e.completed))
+        // ★修正13: startまたはendが無効なデータを除外
+        .filter(e => (e.type === 'schedule' || (e.type === 'task' && e.completed)) && (e.start && e.end))
         .map(e => ({
             ...e,
+            // logTimeのDateオブジェクトが有効であることを前提とする
             logTime: new Date(e.actualEnd || e.end) // タスクはactualEnd、予定はendを使用
         }))
+        // Invalid Dateを除外
+        .filter(e => !isNaN(e.logTime.getTime()))
         .sort((a, b) => b.logTime.getTime() - a.logTime.getTime());
 
     let html = '<h2 class="text-xl font-extrabold ink-border-b pb-2 mb-4">日誌 (タイムライン振り返り)</h2>';
@@ -1732,6 +1804,15 @@ window.handleDragStart = function(e) {
     const id = parseInt(e.target.getAttribute('data-event-id'));
     // ドラッグでの複製を無効化 (duplicate: falseに固定)
     const isDuplicating = false; 
+    
+    // ★修正14: 無効な日付のイベントはドラッグを許可しない
+    const event = appData.schedules.find(ev => ev.id === id);
+    if (!event || !event.start || !event.end) {
+        e.preventDefault();
+        console.error(`D&D開始エラー: ID ${id} の予定に無効な日付が含まれています。`);
+        return;
+    }
+
 
     // dataTransferにイベントIDと複製フラグを格納
     e.dataTransfer.effectAllowed = 'move'; // 移動のみ許可
@@ -1758,7 +1839,13 @@ window.handleTouchStart = function(e) {
     const eventElement = e.currentTarget;
     const id = parseInt(eventElement.getAttribute('data-event-id'));
     const eventData = appData.schedules.find(ev => ev.id === id);
-    if (!eventData) return;
+    
+    // ★修正15: 無効な日付のイベントはタッチでのD&Dを許可しない
+    if (!eventData || !eventData.start || !eventData.end) {
+        console.error(`タッチD&D開始エラー: ID ${id} の予定に無効な日付が含まれています。`);
+        return;
+    }
+
 
     // タッチデータをグローバル変数に保存
     draggedEventData = {
@@ -1960,7 +2047,12 @@ window.handleDrop = function(e, isMonthView = false) {
 function processDrop(id, duplicate, targetSlot, clientX, clientY, isMonthView = false) {
     
     const originalEvent = appData.schedules.find(ev => ev.id === id);
-    if (!originalEvent) return;
+    // ★修正16: originalEventまたはその日付プロパティが無効な場合は処理を中断
+    if (!originalEvent || !originalEvent.start || !originalEvent.end) {
+        console.error(`ドロップ処理エラー: ID ${id} の予定データが無効です。`);
+        return;
+    }
+
 
     // ドロップターゲットのセル情報を取得
     const dayStr = targetSlot.getAttribute('data-date'); // YYYY-MM-DD
@@ -2058,26 +2150,21 @@ window.onload = async function() {
     window.handleTouchEnd = handleTouchEnd;
     
     // ------------------------------------------------
-    // ★修正: データロードのロジックを変更 (キャッシュ優先)
+    // ★修正: データロードのロジックをリモートのみに更新
     // ------------------------------------------------
 
-    // 1. キャッシュから同期的にデータをロードし、即座にレンダリング
-    const loadedFromCache = loadCache();
-    if (!loadedFromCache) {
-        // キャッシュがない場合、空のデータで初期化
-        initializeDemoData();
-    }
-    
     // 現在時刻の更新ループ
     updateCurrentTime();
     setInterval(updateCurrentTime, 1000);
 
-    // 初期ビューのレンダリング (キャッシュデータがあれば表示)
-    renderView(appData.currentView);
-    
-    // 2. JSON Binから非同期で最新データをロードし、キャッシュを更新
-    // これにより、サイトはすぐに表示され、バックグラウンドで最新データが取得される
-    await loadDataFromRemote(); 
+    // 1. JSON Binから最新データをロード
+    const loadedFromRemote = await loadDataFromRemote();
 
-    // ------------------------------------------------
+    // 2. ロードに成功しなかった場合、またはデータが不正だった場合、空のデータで初期化
+    if (!loadedFromRemote) {
+        initializeDemoData();
+    }
+    
+    // 3. 初期ビューのレンダリング
+    renderView(appData.currentView);
 };
